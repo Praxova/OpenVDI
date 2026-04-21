@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: openvdi-postgres
+    environment:
+      POSTGRES_USER: openvdi
+      POSTGRES_PASSWORD: openvdi
+      POSTGRES_DB: openvdi
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openvdi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
