@@ -18,7 +18,7 @@ CREATE TABLE clusters (
 
     api_url         VARCHAR(512) NOT NULL,       -- https://pve1.example.com:8006 (or provider equivalent)
     token_id        VARCHAR(256) NOT NULL,       -- user@realm!tokenid (Proxmox) or provider equivalent
-    token_secret    VARCHAR(256) NOT NULL,       -- encrypted at rest
+    token_secret    VARCHAR(256) NOT NULL,       -- Fernet ciphertext; key in OPENVDI_ENCRYPTION_KEY
     verify_ssl      BOOLEAN DEFAULT TRUE,
     node_filter     VARCHAR(512),                -- optional: limit to specific nodes
 
@@ -28,7 +28,7 @@ CREATE TABLE clusters (
     --   vSphere: {"datacenter": "DC1", "cluster": "Prod"}
     provider_config JSONB DEFAULT '{}'::jsonb,
 
-    status          VARCHAR(32) DEFAULT 'active',-- active, maintenance, offline
+    status          VARCHAR(32) DEFAULT 'pending',-- pending, active, maintenance, offline
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
@@ -150,7 +150,8 @@ CREATE TABLE desktops (
 
     -- Assignment
     assigned_user   VARCHAR(256),                -- AD username (null = unassigned)
-    assignment_type VARCHAR(32),                 -- 'persistent' or 'floating'
+    assignment_type VARCHAR(32),                 -- 'persistent' (survives session end) or
+                                                 -- 'floating' (cleared by session tracker on session end)
 
     -- State
     status          desktop_status DEFAULT 'provisioning',
