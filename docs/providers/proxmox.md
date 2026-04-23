@@ -206,6 +206,8 @@ Field mapping from Proxmox response:
 
 **Snapshots operate on CLONED DESKTOP VMs, never on templates.** Templates have no OpenVDI-managed snapshots. The `openvdi-base` snapshot is per-desktop, created after initial provisioning for use in non-persistent refresh-on-logoff rollbacks. See `session-tracking.md` → *Snapshot Model*.
 
+> **Implementation status.** The Protocol methods `create_snapshot`, `rollback_snapshot`, `list_snapshots`, `delete_snapshot`, and `configure_vm` are introduced on the `ProxmoxProvider` in Milestone 2. No signature changes from the Protocol definition in `providers.md` — this is an implementation delta. They are exercised by the M2 provisioner when taking the `openvdi-base` snapshot at provisioning time, and by pool-level VM overrides (`cpu_cores`, `memory_mb`) applied via `configure_vm` between clone completion and first start.
+
 | Interface method | Proxmox API |
 |------------------|-------------|
 | `create_snapshot(ref, name, description, include_ram)` | `POST /nodes/{node}/qemu/{vmid}/snapshot` with `snapname=name`, `vmstate=include_ram` |

@@ -4,6 +4,8 @@
 
 Session tracking operates at three layers, from coarse to precise. The MVP implements Layers 1 and 2. Layer 3 is a future enhancement requiring a custom in-VM agent.
 
+> **M2 scope note.** This document describes the full session-tracking and pool-refresh behavior OpenVDI is building toward. Milestone 2 ships **Layer 1 only** (broker-level session state and a thin state machine) plus the **provisioning-time** half of the non-persistent lifecycle — clone, configure, start, wait for agent, shutdown, create the `openvdi-base` snapshot, restart. The *refresh-on-logoff* and *delete-on-logoff* cycles, the session monitor polling loop, the pool provisioner background worker, and the health checker are Milestone 4 deliverables. Until M4 ships, non-persistent desktops remain assigned to the last connected user after session end; admins recycle them manually via `POST /desktops/{id}/rebuild` or `DELETE /desktops/{id}`.
+
 ## Layer 1 — Broker-Level Tracking
 
 **Always available. No agent required.**

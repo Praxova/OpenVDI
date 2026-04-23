@@ -32,7 +32,7 @@ CREATE TABLE clusters (
 
     api_url         VARCHAR(512) NOT NULL,       -- https://pve1.example.com:8006 (or provider equivalent)
     token_id        VARCHAR(256) NOT NULL,       -- user@realm!tokenid (Proxmox) or provider equivalent
-    token_secret    VARCHAR(256) NOT NULL,       -- encrypted at rest
+    token_secret    VARCHAR(256) NOT NULL,       -- Fernet-encrypted at rest; key from OPENVDI_ENCRYPTION_KEY env var
     verify_ssl      BOOLEAN DEFAULT TRUE,
     node_filter     VARCHAR(512),                -- optional: limit to specific nodes
 
@@ -42,7 +42,7 @@ CREATE TABLE clusters (
     --   vSphere: {"datacenter": "DC1", "cluster": "Prod"}
     provider_config JSONB DEFAULT '{}'::jsonb,
 
-    status          VARCHAR(32) DEFAULT 'active',-- active, maintenance, offline
+    status          VARCHAR(32) DEFAULT 'pending',-- pending, active, maintenance, offline
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
@@ -163,8 +163,13 @@ CREATE TABLE desktops (
     name            VARCHAR(256) NOT NULL,       -- e.g. ENG-003
 
     -- Assignment
-    assigned_user   VARCHAR(256),                -- AD username (null = unassigned)
-    assignment_type VARCHAR(32),                 -- 'persistent' or 'floating'
+    --   assigned_user: AD username (null = unassigned).
+    --   assignment_type: 'persistent' (survives session end) or 'floating'
+    --     (cleared on session end by the session tracker; the desktop
+    --     returns to the pool's warm-spare population). Null when
+    --     assigned_user is null.
+    assigned_user   VARCHAR(256),
+    assignment_type VARCHAR(32),
 
     -- State
     status          desktop_status DEFAULT 'provisioning',
@@ -281,13 +286,15 @@ CREATE INDEX idx_session_metrics_session ON session_metrics(session_id, timestam
 
 ## VMID Allocation Strategy (Proxmox Provider)
 
-Each pool is assigned a non-overlapping integer range (e.g. 5000-5099). VMIDs are allocated sequentially within the range and reused when desktops are deleted.
+Each pool is assigned a non-overlapping integer range (e.g. 5000-5099). Within that range, VMIDs are allocated using a **lowest-available** strategy: at clone time, the allocator picks the smallest integer in the range not currently used by any `desktops` row for that pool. Deleted desktops free their VMID for reuse.
 
-- Range is specified at pool creation time
-- Application layer validates no overlap with existing pools
-- Application layer validates against existing Proxmox VMs before cloning
-- `max_size` is constrained to fit within the range via CHECK constraint
-- Provides visual grouping in Proxmox UI (all Engineering desktops are 5000-5099)
+- Range is specified at pool creation time.
+- Application layer validates no overlap with existing pools.
+- At pool creation (`POST /pools`), the allocator scans Proxmox for any VMs already present in the range. If any are found, the pool creation is rejected with `CONFLICT`.
+- At clone time, the allocator trusts the DB. If a collision is discovered when Proxmox rejects the clone (409), the allocator retries once with the next candidate VMID.
+- `max_size` is constrained to fit within the range via `CHECK` constraint.
+- Concurrency: the allocator acquires a Postgres transaction-scoped advisory lock keyed on the pool ID (`pg_advisory_xact_lock(hashtext('pool:' || pool_id::text))`) before selecting and inserting. This serializes allocations on a per-pool basis without global locking.
+- Provides visual grouping in Proxmox UI (all Engineering desktops are 5000-5099).
 
 For non-Proxmox providers, handle allocation is the provider's concern; the `vmid_range_*` columns may be ignored by the provider and the allocator delegated to `provider_config`. The shape will be formalized when a second provider is added.
 
@@ -306,8 +313,10 @@ Providers without native tag support either simulate tags in a provider-specific
 
 ## Notes
 
-- `token_secret` in clusters table must be encrypted at rest (application-layer encryption or Postgres column encryption)
+- `token_secret` in the clusters table is encrypted at rest via application-layer **Fernet** symmetric encryption (`cryptography.fernet`). The encryption key is loaded from the `OPENVDI_ENCRYPTION_KEY` environment variable at broker startup; the broker refuses to start if the key is missing or malformed. Encryption and decryption are handled exclusively in the service layer — models store ciphertext, endpoints never return the plaintext to the client.
+- `clusters.status` values: `pending` (pre-first-ping: newly registered or just updated; awaiting background health check), `active` (last ping succeeded), `maintenance` (admin-disabled), `offline` (last ping failed). Transitions: `pending → active | offline` on first ping completion; `active ↔ offline` on subsequent ping outcomes; `* → maintenance` on admin action.
+- `desktops.assigned_user` semantics: populated for both persistent and non-persistent desktops while a session is active. On session end, `assignment_type='floating'` desktops have `assigned_user` cleared (the desktop returns to the available pool); `assignment_type='persistent'` desktops retain `assigned_user`. Per-pool assignment applies — a user may simultaneously hold one desktop per pool they are entitled to.
 - `connection_info` in sessions is ephemeral — cleared when session ends to avoid leaking tickets. The shape is a `ConsoleTicket` (see `providers.md`) serialized to JSON; the portal reads the `kind` field to route to the correct renderer.
-- `session_metrics` table is for future OpenVDI in-VM agent; not used in MVP
-- All timestamps are TIMESTAMPTZ (UTC)
+- `session_metrics` table is for future OpenVDI in-VM agent; not used in MVP.
+- All timestamps are TIMESTAMPTZ (UTC).
 - The Proxmox-flavored column names (`pve_vmid`, `pve_node`, `pve_task_upid`, `pve_pool_id`) are retained for the v0 single-provider case. When a second provider lands, these columns will be either renamed (generic) or moved into per-desktop JSONB — decided based on what the second provider's data model looks like, not speculatively.

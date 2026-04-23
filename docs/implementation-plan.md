@@ -274,29 +274,62 @@ This milestone is being restarted. The prior attempt (Sonnet 4.6) was built agai
 
 ### Milestone 2 — "Broker assigns a desktop" (Weekend 2)
 
-**Goal:** Core broker logic working via API, consuming the provider interface. No auth, no frontend yet.
+**Goal:** Deliver the full HTTP broker surface and the service layer behind it. All M2 flows are exercised end-to-end through curl; no React portal and no real auth yet (header-based dev auth stands in for JWT/LDAP). At the end of M2, an admin can register a cluster, register a template, create a pool, pre-provision desktops, and a user can hit `POST /me/desktops/{pool_id}/connect` and receive a noVNC ticket that the M1 test VM would have accepted.
 
-**Deliverables:**
-- `broker/app/database.py` — SQLAlchemy async engine
-- `broker/app/models/` — All ORM models
-- `broker/app/schemas/` — Pydantic request/response models
-- `broker/app/services/vmid_allocator.py` — VMID range allocation (passes `newid` via `CloneRequest.provider_opts`)
-- `broker/app/services/provisioner.py` — Clone + `openvdi-base` snapshot lifecycle for non-persistent pools, using `HypervisorProvider` only
-- `broker/app/services/broker.py` — Connection brokering logic, using `HypervisorProvider` only
-- Extended `ProxmoxProvider` (and the `HypervisorProvider` Protocol if new methods surface): `create_snapshot`, `rollback_snapshot`, `list_snapshots`, `delete_snapshot`, `configure_vm`
-- `broker/app/api/pools.py` — Pool CRUD endpoints
-- `broker/app/api/desktops.py` — Desktop management endpoints
-- `broker/app/api/user.py` — `/me/desktops/{pool_id}/connect` endpoint
-- `broker/app/main.py` — FastAPI app
+**Deliverables — data layer:**
+- `broker/app/database.py` — SQLAlchemy 2.x async engine, session factory, `get_db_session` dependency (session-per-request).
+- `broker/app/models/` — one ORM model per file (`cluster.py`, `template.py`, `pool.py`, `desktop.py`, `session.py`, `entitlement.py`, `audit.py`). `updated_at` via `onupdate=func.now()`. Models are pure data — they do NOT import from `providers/`.
+- `broker/app/schemas/` — Pydantic schemas with `*Create`, `*Update`, `*Read` trio per resource, one file per resource. Includes generic `APIResponse[T]` wrapper and a `PaginationParams` base for `Depends()`.
+- `broker/app/crypto.py` — Fernet encryption helpers (`encrypt_secret`, `decrypt_secret`) keyed on `OPENVDI_ENCRYPTION_KEY`. Includes a one-shot key-generation CLI (`python -m app.crypto generate-key`).
+- `db/001_schema.sql` — extended with `pending` in `cluster_status` enum and explicit `assignment_type` documentation (`persistent` | `floating`).
+- `db/002_seed_data.sql` — placeholder cluster rows stay in `pending` until their first live ping from the broker.
+- `scripts/db-reset.sh` — runs `drop_all.sql` → `001_schema.sql` → `002_seed_data.sql`. Used by the M2 end-to-end test harness.
 
-**Validation:** Via curl:
-1. Register cluster (with `provider_type="proxmox"`)
-2. Register template
-3. Create pool with VMID range
-4. Create entitlement
-5. `POST /me/desktops/{pool_id}/connect` returns noVNC connection info
-6. Desktop appears in Proxmox, pool status accurate
-7. Non-persistent desktop has `openvdi-base` snapshot after provisioning
+**Deliverables — provider extensions:**
+- `ProxmoxProvider.create_snapshot`, `rollback_snapshot`, `list_snapshots`, `delete_snapshot` — already in the `HypervisorProvider` Protocol; implemented on the concrete class in M2 per `providers/proxmox.md` → *Snapshots*.
+- `ProxmoxProvider.configure_vm` — implemented for the M2 pool-override flow (post-clone, pre-first-start).
+
+**Deliverables — services:**
+- `broker/app/services/vmid_allocator.py` — lowest-available VMID allocation within pool range; Postgres transaction advisory lock keyed per-pool to serialize concurrent allocations; one-shot retry on Proxmox VMID collision. Pool-create-time Proxmox scan to reject ranges that already contain VMs.
+- `broker/app/services/provisioner.py` — full provisioning cycle: clone → apply overrides → start → wait for agent → [non-persistent: shutdown → create `openvdi-base` → start] → mark `available`. DB row created in `provisioning` state before clone so the VMID is reserved. Failed provisioning leaves VM intact and marks desktop row `error` with `error_message` — no auto-cleanup.
+- `broker/app/services/broker.py` — connect flow for `POST /me/desktops/{pool_id}/connect`. Per-user-per-pool advisory lock during connect. Persistent: find existing assignment or 503 (M2 does not clone on connect — pre-provision required). Non-persistent: find available spare, mark `floating` assignment, or 503 if none. Session row written in `connecting` before the provider ticket call; promoted to `active` once the ticket is in hand.
+- `broker/app/services/session_tracker.py` — thin synchronous state machine: `transition_to_active`, `transition_to_disconnected`, `transition_to_ended`. `ended` clears `connection_info` in a single UPDATE. No polling loop.
+- `broker/app/services/auth_service.py` — header parser that produces the `User` object attached to `request.state.user`. Pattern is JWT-ready: M4 swaps the middleware, handlers and downstream deps are unchanged.
+- `broker/app/services/audit_service.py` — `log_business_event(actor, action, resource_type, resource_id, details)` for service-layer audit writes (e.g. `broker.connect`, `broker.session.end`).
+- `broker/app/services/task_tracker.py` — helpers for the background-task-polls-DB pattern. On broker startup, inspects desktops with non-null `pve_task_upid` and resumes polling.
+
+**Deliverables — HTTP layer:**
+- `broker/app/middleware/auth.py` — header-based dev auth (`X-Dev-User`, `X-Dev-Groups`, `X-Dev-Role`). Broker refuses to start in dev-auth mode unless `OPENVDI_AUTH_MODE=dev` is set explicitly.
+- `broker/app/middleware/audit.py` — HTTP-level audit rows for every admin mutation (POST/PUT/DELETE on admin endpoints). Explicit redaction list: `token_secret`, `password`, any `SecretStr` field.
+- `broker/app/main.py` — FastAPI app with lifespan handler that loads clusters, constructs providers into `app.state.providers`, fires background cluster ping tasks, and cleanly closes providers at shutdown. `get_provider(cluster_id)` dependency. Global exception handlers mapping `ProviderError` subclasses to `PROVIDER_ERROR` / `PROVIDER_TIMEOUT` / `POOL_FULL` etc. per `api-design.md`. Response envelope (`APIResponse[T]`) applied uniformly.
+- `broker/app/api/` — separate `admin_router` (`/api/v1/…`) and `user_router` (`/api/v1/me/…`) with their own dependency chains. Admin routers: `clusters.py`, `templates.py`, `pools.py`, `desktops.py`, `sessions.py`, `entitlements.py`, `audit.py`, `dashboard.py`. User router: `user.py` (`/me/*`). `POST /clusters` and `PUT /clusters/{id}` validate via `provider.ping()` before persisting. `POST /templates` does light validation via `get_vm_status`. Async destructive ops (`DELETE /desktops/{id}`, `POST /desktops/{id}/rebuild`, `POST /pools/{id}/drain`, `POST /pools/{id}/provision`) return 202 Accepted and are orchestrated via FastAPI `BackgroundTasks`.
+
+**Deliverables — testing:**
+- `broker/scripts/test_m2_end_to_end.sh` — curl-driven walkthrough. Runs `db-reset.sh`, starts the broker, walks: `PUT /clusters/{seed_id}` with real creds → register template → create pool → pre-provision → connect → verify desktop and snapshot present in Proxmox → disconnect → destroy. Prints PASS/FAIL per step like the M1 script.
+
+**Validation:** The M2 end-to-end test script exercises the full flow. Manual acceptance checkpoints as it runs:
+1. After `db-reset.sh`, the seeded cluster row is in `status='pending'`.
+2. `PUT /clusters/{seed_id}` with real credentials triggers a `ping()`; on success the cluster flips to `active` and its provider is constructed in-process.
+3. Template registration calls `provider.get_vm_status` and rejects non-templates.
+4. Pool creation scans Proxmox for any existing VMs in the declared VMID range and rejects the pool if any are found.
+5. `POST /pools/{id}/provision` returns 202 immediately; the desktops appear in `provisioning`, transition through `available`, and acquire the `openvdi-base` snapshot (non-persistent pools only) visible in Proxmox.
+6. `POST /me/desktops/{pool_id}/connect` returns a nested-ticket response matching the shape in `api-design.md`; the websocket URL is reachable from a browser; `desktops.assigned_user` is set for the connected user.
+7. `DELETE /me/sessions/{id}` transitions the session to `ended`, clears `connection_info`, and (for non-persistent) clears `assigned_user`.
+8. Admin `DELETE /desktops/{id}` returns 202 and the VM is gone from Proxmox once the background task completes.
+9. Connecting without `X-Dev-Role=admin` to an admin endpoint returns 403; a non-admin caller's error response contains no `details` field.
+
+**Explicitly out of scope for M2:**
+- Real LDAP/JWT auth → M4.
+- Refresh-on-logoff worker for non-persistent pools → M4. (Snapshot is created; recycle is not.)
+- Pool provisioner background worker → M4. M2 is lazy/on-demand via the provision endpoint.
+- Session monitor (guest agent polling loop) → M4.
+- Health checker worker → M4.
+- React portal → M3.
+- Provider conformance test suite → M4.
+- Alembic migrations → M4. Raw SQL for M2.
+- JSON structured logging → M4+. Human-readable logs for M2.
+- Dashboard aggregate caching → M4+.
+- Second hypervisor provider → post-v0.
 
 ### Milestone 3 — "I can connect from a browser" (Weekend 3)
 
@@ -416,3 +449,16 @@ npm run dev
 | Hypervisor provider abstraction from day 1 | Avoids Omnissa/Horizon trap (tight vCenter coupling = rewrite to move); retrofitting post-M2 would be a rewrite; cost to build now is ~200 lines of typed shared models and a folder layout | 2026-04-21 |
 | v0 requires noVNC-capable providers only | Scope-constrains the console renderer in the portal to one implementation; data shapes (WebMKS, SPICE, RDP) in place for future providers | 2026-04-21 |
 | Lowest-common-denominator avoided via `ProviderCapabilities` + `provider_opts` | Provider-specific strengths (SDN, resource pools, templates model) preserved through a capabilities declaration and opaque provider-options blob, rather than being flattened out of the interface | 2026-04-21 |
+| Header-based fake auth for M2 dev | Unblocks API development without waiting on LDAP/JWT stack; same `User` shape as the eventual JWT path so M4 middleware swap is transparent to handlers | 2026-04-23 |
+| Refresh-on-logoff deferred to M4 | The M2 provisioner creates the `openvdi-base` snapshot but no worker polls the guest agent yet; keeping the worker out of M2 keeps the milestone a pure HTTP/service deliverable | 2026-04-23 |
+| Lazy provisioning in M2, no warm-spare worker | Admin pre-provisions via `POST /pools/{id}/provision`; connect is synchronous against existing `available` desktops or 503. Keeps M2 testable via curl without a loop thread to reason about | 2026-04-23 |
+| Async destructive ops return 202 | Clone-on-demand and destroy are long (seconds to minutes); surfacing a job status on the resource's `GET` endpoint avoids inventing a jobs-API in M2 | 2026-04-23 |
+| Session row written in `connecting` before the ticket call | Ticket creation is the riskiest network call in the connect path; having the session row pre-written gives the audit trail and state-machine a clean home even if the ticket call fails | 2026-04-23 |
+| Per-user-per-pool advisory lock on connect | User double-clicking "connect" shouldn't mint two sessions for the same pool; lock keyed on `hashtext('user:<user>:pool:<pool>')` serializes without blocking other users | 2026-04-23 |
+| Per-pool advisory lock on VMID allocation | Concurrent provision calls for the same pool must not collide on a VMID; scope the lock to the pool, not globally | 2026-04-23 |
+| Error `details` admin-only | Provider failures often carry node names, storage IDs, and stack traces. Admins need those to debug; users shouldn't see them | 2026-04-23 |
+| Fernet encryption for `token_secret` at rest | Symmetric, key in env var, drop-in via `cryptography` — DB dumps are safer and rotating keys requires only re-encrypting the `clusters` table | 2026-04-23 |
+| Cluster lifespan fully handled in M2 | `PUT /clusters/{id}` transactionally closes the old provider and constructs the new; `DELETE /clusters/{id}` rejects when pools still reference the cluster; startup tolerates offline clusters by marking `status='offline'` and continuing | 2026-04-23 |
+| New cluster enum value `pending` | Clusters start in `pending` pre-first-ping; a background task flips them to `active`/`offline` based on the first `provider.ping()` result. Avoids the wrong implication that a just-inserted row is definitely alive | 2026-04-23 |
+| Audit at two layers (middleware + service) | HTTP middleware catches CRUD mutations with redaction; service layer writes domain events (`broker.connect`, `broker.session.end`) that have no clean HTTP mapping | 2026-04-23 |
+| No users table, AD is source of truth | Entitlements match usernames/group names from the auth context directly; keeping OpenVDI out of identity management | 2026-04-23 |

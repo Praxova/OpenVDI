@@ -12,6 +12,20 @@ FastAPI REST API serving both the admin dashboard and user-facing web portal. JW
 - Token contains: `sub` (username), `groups` (AD group memberships), `role` (admin/user)
 - Admin role determined by membership in a configurable AD group
 
+### M2 Dev-Mode Authentication
+
+M2 ships **header-based fake authentication** to unblock API development before the LDAP/JWT stack lands in M4. The middleware reads three headers on every request and constructs the same in-memory `User` shape that the JWT path will produce later:
+
+| Header | Meaning |
+|--------|---------|
+| `X-Dev-User` | Username (e.g. `jsmith`) |
+| `X-Dev-Groups` | Comma-separated AD group names (e.g. `Engineering,VPN Users`) |
+| `X-Dev-Role` | `admin` or `user` |
+
+Admin endpoints assert `role == admin`; user endpoints assert `role` is set. Missing or malformed headers produce a 401. In M4 this middleware is replaced with JWT validation — the downstream handlers and dependencies read from `request.state.user` in both modes and are unaffected by the switch.
+
+This is a **development convenience, not a security boundary**. The broker MUST refuse to start in dev-auth mode unless an explicit `OPENVDI_AUTH_MODE=dev` env var is set.
+
 ## Admin Endpoints
 
 Require `role=admin` in JWT.
@@ -125,13 +139,36 @@ User requests connection to pool "Engineering"
     │
     └─ Return to client:
         {
-          "session_id": "uuid",
-          "protocol": "novnc",
-          "websocket_url": "wss://pve-node:port/websockify?token=...",
-          "password": "...",
-          "desktop_name": "ENG-003"
+          "data": {
+            "session_id": "uuid",
+            "desktop_name": "ENG-003",
+            "ticket": {
+              "kind": "novnc",
+              "websocket_url": "wss://pve-node:port/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket?port=...&vncticket=...",
+              "password": "...",
+              "cert_pem": "..."
+            }
+          },
+          "error": null
         }
 ```
+
+The `ticket` object is a typed sum — its `kind` field determines which other fields are present. For v0 only `"novnc"` is produced; the portal reads `kind` and dispatches to the appropriate renderer. The shape mirrors the `ConsoleTicket` type defined in `providers.md`.
+
+### Per-Pool Assignment Semantics
+
+A user may hold at most one desktop per pool they are entitled to. A user entitled to N pools may therefore hold up to N desktops concurrently (one per pool). Subsequent connect calls to the same pool return the user's existing desktop for that pool rather than provisioning a second one. This applies to both persistent and non-persistent pools; the distinction is only in lifecycle (persistent desktops survive session end; non-persistent are recycled).
+
+### Async Destructive Operations
+
+The following endpoints return **202 Accepted** and perform their work in the background. Current status is visible on the resource's `GET` endpoint:
+
+- `DELETE /desktops/{id}` — destroys the VM and removes the record
+- `POST /desktops/{id}/rebuild` — destroys and re-clones, preserving assignment
+- `POST /pools/{id}/drain` — marks pool `draining`, stops provisioning
+- `POST /pools/{id}/provision` — pre-provisions desktops toward `min_spare`
+
+The connect endpoint (`POST /me/desktops/{pool_id}/connect`) is **synchronous**: it returns 200 with a ticket if an available desktop exists, or 503 `POOL_FULL` if not. It never triggers on-demand provisioning in M2; admins use `POST /pools/{id}/provision` to pre-warm a pool.
 
 ## Request/Response Conventions
 
@@ -151,5 +188,39 @@ User requests connection to pool "Engineering"
 | 404 | `NOT_FOUND` | Resource doesn't exist |
 | 409 | `CONFLICT` | VMID range overlap, duplicate name, etc. |
 | 503 | `POOL_FULL` | Non-persistent pool at max capacity |
-| 502 | `PROXMOX_ERROR` | Proxmox API returned an error |
-| 504 | `PROXMOX_TIMEOUT` | Proxmox API call timed out |
+| 502 | `PROVIDER_ERROR` | Underlying hypervisor provider returned an error |
+| 504 | `PROVIDER_TIMEOUT` | Hypervisor provider call timed out |
+
+Error codes are deliberately provider-agnostic: `PROVIDER_ERROR` and `PROVIDER_TIMEOUT` cover the Proxmox provider today and any future provider (vSphere, Hyper-V, etc.) without churn.
+
+### Error Response Shape and Admin-Only Details
+
+Standard error envelope:
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "PROVIDER_ERROR",
+    "message": "Human-readable summary of what went wrong"
+  }
+}
+```
+
+For callers with `role=admin`, errors caused by the provider include an additional `details` object with provider-specific diagnostic information:
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "PROVIDER_ERROR",
+    "message": "Clone task failed",
+    "details": {
+      "provider": "proxmox",
+      "raw": "task UPID:pve1:... failed: storage 'local-lvm' is full"
+    }
+  }
+}
+```
+
+The `details` field is **omitted entirely** for non-admin users. This prevents leaking hypervisor internals, storage layout, and node names to regular users while keeping admins able to diagnose failures without grepping logs.
