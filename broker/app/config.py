@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import functools
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +38,22 @@ class Settings(BaseSettings):
     # Application-layer secret encryption (Fernet). Required at startup;
     # missing key fails fast rather than silently producing garbage.
     openvdi_encryption_key: SecretStr
+
+    # Postgres connection parameters. database_url assembles these into
+    # the asyncpg DSN consumed by SQLAlchemy in broker/app/database.py.
+    postgres_user: str
+    postgres_password: SecretStr
+    postgres_db: str
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+
+    @property
+    def database_url(self) -> str:
+        pw = quote_plus(self.postgres_password.get_secret_value())
+        return (
+            f"postgresql+asyncpg://{self.postgres_user}:{pw}@"
+            f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
 
     @field_validator("proxmox_target_storage", mode="before")
     @classmethod
