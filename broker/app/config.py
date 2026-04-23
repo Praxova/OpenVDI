@@ -1,34 +1,50 @@
-"""OpenVDI broker configuration via pydantic-settings."""
+"""OpenVDI broker configuration.
 
+Single Settings class loaded from the repo-root .env file. Proxmox-flavored
+fields for Milestone 1; when a second provider arrives, config will be
+restructured.
+"""
+from __future__ import annotations
+
+import functools
+from pathlib import Path
+
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolve .env relative to this file so the path works regardless of cwd.
+# broker/app/config.py -> broker/app -> broker -> repo root
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
+        env_file=_ENV_FILE,
+        env_prefix="",
         case_sensitive=False,
+        extra="ignore",
     )
 
-    # ── Proxmox VE ────────────────────────────────────────
-    pve_api_url: str = "https://10.0.0.2:8006"
-    pve_token_id: str = ""  # user@realm!tokenid
-    pve_token_secret: str = ""  # uuid secret
-    pve_verify_ssl: bool = False
+    proxmox_api_url: str
+    proxmox_token_id: str
+    proxmox_token_secret: SecretStr
+    proxmox_verify_ssl: bool = True
+    proxmox_default_node: str
+    proxmox_template_vmid: int
+    proxmox_test_vmid: int
+    proxmox_target_storage: str | None = None
 
-    # ── Database ──────────────────────────────────────────
-    db_url: str = "postgresql+asyncpg://openvdi:openvdi@localhost:5434/openvdi"
-
-    # ── Broker ────────────────────────────────────────────
-    broker_host: str = "0.0.0.0"
-    broker_port: int = 8080
-    log_level: str = "INFO"
-
-    # ── Proxmox defaults ─────────────────────────────────
-    default_node: str = "pis-dev"
-    default_template_vmid: int = 9001
-    clone_timeout: int = 300  # seconds
-    task_poll_interval: float = 1.0
+    @field_validator("proxmox_target_storage", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v):
+        # .env often sets unused optional fields to "" rather than omitting
+        # them. Treat empty string as unset so downstream code sees None.
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 
-settings = Settings()
+@functools.lru_cache
+def get_settings() -> Settings:
+    """Return the cached settings instance."""
+    return Settings()
