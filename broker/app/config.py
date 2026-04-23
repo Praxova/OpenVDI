@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     proxmox_test_vmid: int
     proxmox_target_storage: str | None = None
 
+    # Application-layer secret encryption (Fernet). Required at startup;
+    # missing key fails fast rather than silently producing garbage.
+    openvdi_encryption_key: SecretStr
+
     @field_validator("proxmox_target_storage", mode="before")
     @classmethod
     def _empty_str_to_none(cls, v):
@@ -41,6 +45,15 @@ class Settings(BaseSettings):
         # them. Treat empty string as unset so downstream code sees None.
         if isinstance(v, str) and v.strip() == "":
             return None
+        return v
+
+    @field_validator("openvdi_encryption_key", mode="after")
+    @classmethod
+    def _non_empty_encryption_key(cls, v: SecretStr) -> SecretStr:
+        # Empty string would pass the SecretStr type check but is a
+        # configuration bug — fail loudly at Settings() construction.
+        if not v.get_secret_value():
+            raise ValueError("OPENVDI_ENCRYPTION_KEY must not be empty")
         return v
 
 
