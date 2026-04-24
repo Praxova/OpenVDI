@@ -305,3 +305,9 @@ For session tracking to work, VM templates MUST have:
 5. **VM converted to a template** (`qm template <vmid>` or `--template 1` at create time)
    - Non-template VMs cannot be linked-cloned from; Proxmox forces full clones
    - Template status is verified during `POST /templates/{id}/validate`
+
+6. **Guest agent service ordered after OS steady state** (recommended, especially on Windows)
+   - The non-persistent provisioning cycle creates the `openvdi-base` snapshot shortly after the agent becomes pingable. If the agent responds while the OS is still mid-init, the resulting snapshot captures a half-initialized state and rollback-on-logoff produces a desktop that never fully boots.
+   - The provisioner applies a conservative post-agent-up quiesce window (see `m2-07a-post-boot-quiesce.md`) regardless of template ordering, so this requirement is advisory — not a correctness gate. Template-side ordering reduces the required quiesce and shortens warm-spare provisioning latency.
+   - Linux: add `After=multi-user.target` (or a specific late-stage target) to the `qemu-guest-agent.service` override.
+   - Windows: the VirtIO guest agent service starts early by default. Mitigations include adding `DependOnService` entries to the service (for example, depending on the `Schedule` or `Winlogon` service) so the agent reports ready only after the logon subsystem is up.

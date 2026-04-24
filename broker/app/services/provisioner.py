@@ -66,6 +66,22 @@ logger = logging.getLogger(__name__)
 _AGENT_POLL_TIMEOUT_SECONDS = 90
 _AGENT_POLL_INTERVAL_SECONDS = 2.0
 
+# Seconds to wait after the guest agent first responds before taking the
+# openvdi-base snapshot for non-persistent desktops. The agent on Windows
+# responds early in the service chain -- well before the OS has reached
+# steady state. Snapshotting at that point produces a half-initialized
+# baseline that rollback-on-logoff can never recover.
+#
+# 60s is a conservative default that covers the observed Windows 11 boot
+# window. A properly-ordered template (see session-tracking.md -> Template
+# Requirements item 6) can tolerate a lower value; tune downward with
+# evidence, not by hunch. Raising past 120s probably means the template
+# itself has a problem and the value is papering over it.
+#
+# Applies to non-persistent provisioning ONLY. Persistent desktops are
+# handed directly to a user after agent-up -- no snapshot, no quiesce.
+_POST_BOOT_QUIESCE_SECONDS = 60
+
 
 class PoolInactive(Exception):
     """Pool is not in 'active' status; provisioning is refused."""
@@ -271,8 +287,23 @@ async def provision_desktop(
                 else DesktopStatus.AVAILABLE
             )
         else:
-            # Step 7-alt: graceful shutdown → openvdi-base snapshot →
-            # start again → wait agent
+            # Step 7-alt: quiesce → graceful shutdown → openvdi-base
+            # snapshot → start again → wait agent.
+            #
+            # The quiesce exists because agent_ping=True fires long
+            # before Windows is at steady state; shutting down mid-init
+            # and snapshotting the result produces an unrollback-able
+            # baseline. See m2-07a docs/prompt for the rationale.
+            logger.info(
+                "vmid=%d: post-boot quiesce (%ds) before openvdi-base snapshot",
+                desktop.pve_vmid, _POST_BOOT_QUIESCE_SECONDS,
+            )
+            await asyncio.sleep(_POST_BOOT_QUIESCE_SECONDS)
+            logger.info(
+                "vmid=%d: quiesce complete, proceeding to shutdown",
+                desktop.pve_vmid,
+            )
+
             logger.info("provisioner: shutdown for snapshot vmid=%d", vmid)
             await provider.wait_for_task(
                 await provider.shutdown_vm(
