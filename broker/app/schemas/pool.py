@@ -14,10 +14,28 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.models.pool import PoolStatus, PoolType
 
 
+# Pool names double as the slug used in Proxmox tags
+# (openvdi-pool-{name}). Proxmox's pve-tag-list format is [a-z0-9_-]+;
+# constraining names at the schema layer means _slugify(pool.name) is a
+# no-op and recovery-from-tags is lossless on the pool dimension.
+# See docs/database-schema.md → VM Tagging Convention.
+POOL_NAME_PATTERN = r"^[a-z0-9_-]+$"
+POOL_NAME_DESCRIPTION = (
+    "Lowercase letters, digits, hyphens, and underscores only. "
+    "Used directly as a Proxmox tag fragment (openvdi-pool-{name})."
+)
+
+
 class PoolCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str
+    name: str = Field(
+        ...,
+        pattern=POOL_NAME_PATTERN,
+        min_length=1,
+        max_length=64,
+        description=POOL_NAME_DESCRIPTION,
+    )
     display_name: str
     description: str | None = None
     pool_type: PoolType
@@ -62,7 +80,13 @@ class PoolUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = None
+    name: str | None = Field(
+        default=None,
+        pattern=POOL_NAME_PATTERN,
+        min_length=1,
+        max_length=64,
+        description=POOL_NAME_DESCRIPTION,
+    )
     display_name: str | None = None
     description: str | None = None
     min_spare: int | None = None
