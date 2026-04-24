@@ -54,6 +54,10 @@ from app.providers.base import (
     VMRef,
 )
 from app.services.provisioner import provision_desktop
+from app.services.session_tracker import (
+    transition_to_active,
+    transition_to_ended,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,12 +261,14 @@ async def connect(
     desktop.last_connected = func.now()
 
     # Step 5: create session row in 'connecting' state.
+    # connected_at is set by transition_to_active in Step 7, not at
+    # row creation — that way the timestamp reflects when we actually
+    # became active, not when the row was reserved.
     session_row = Session(
         desktop_id=desktop.id,
         username=username,
         protocol="novnc",
         status=SessionStatus.CONNECTING,
-        connected_at=func.now(),
     )
     session.add(session_row)
     await session.flush()  # need session_row.id for the return
@@ -270,14 +276,17 @@ async def connect(
     # Step 6: issue noVNC ticket.
     ticket = await provider.get_console_ticket(ref, ConsoleKind.NOVNC)
 
-    # Step 7: session → active with connection_info, desktop → connected.
-    session_row.status = SessionStatus.ACTIVE
-    session_row.connection_info = {
-        "kind": "novnc",
-        "websocket_url": ticket.websocket_url,
-        "password": ticket.password,
-        "cert_pem": ticket.cert_pem,
-    }
+    # Step 7: session → active, desktop → connected.
+    await transition_to_active(
+        session,
+        session_row,
+        connection_info={
+            "kind": "novnc",
+            "websocket_url": ticket.websocket_url,
+            "password": ticket.password,
+            "cert_pem": ticket.cert_pem,
+        },
+    )
     desktop.status = DesktopStatus.CONNECTED
     await session.commit()
 
@@ -320,28 +329,15 @@ async def end_session(
         )
     ).scalar_one()  # NoResultFound → API maps to 404
 
-    desktop = (
-        await session.execute(
-            select(Desktop).where(Desktop.id == session_row.desktop_id)
-        )
-    ).scalar_one()
+    await transition_to_ended(session, session_row)
 
-    session_row.status = SessionStatus.ENDED
-    session_row.ended_at = func.now()
-    session_row.connection_info = None
-
-    if desktop.assignment_type == "floating":
-        desktop.assigned_user = None
-        desktop.assignment_type = None
-        desktop.status = DesktopStatus.AVAILABLE
-    else:
-        # Persistent assignment or no assignment — user keeps the
-        # desktop per S-C2; mark as disconnected so broker can still
-        # find it on next connect.
-        desktop.status = DesktopStatus.DISCONNECTED
-
+    # Fetch the desktop for logging. transition_to_ended loaded it into
+    # the session's identity map, so session.get() is a cache hit.
+    desktop = await session.get(Desktop, session_row.desktop_id)
     await session.commit()
     logger.info(
         "broker: session_id=%s ended (actor=%s) desktop=%s -> %s",
-        session_id, actor_username, desktop.name, desktop.status.value,
+        session_id, actor_username,
+        desktop.name if desktop else "?",
+        desktop.status.value if desktop else "?",
     )
