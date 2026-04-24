@@ -217,6 +217,8 @@ Field mapping from Proxmox response:
 
 `SnapshotInfo.created_at` is Proxmox's `snaptime` (unix epoch) when present; `None` for the synthetic `current` entry.
 
+**Error surface for missing snapshots.** `rollback_snapshot` and `delete_snapshot` called against a non-existent `snapname` do NOT raise `ProviderNotFoundError`. Proxmox accepts the HTTP request and returns HTTP 200 with a UPID; the async task subsequently fails with a message like `"snapshot 'x' does not exist"`. The surfaced exception is therefore `ProviderTaskError` via `wait_for_task`, not `ProviderNotFoundError` via the initial request. This is a general Proxmox pattern for operations on named sub-resources of a VM — the VM URL is validated synchronously but the sub-resource identity is validated at task-execution time. The provider does NOT pattern-match on the task error string to reclassify the failure — Proxmox error message wording is not an API stability guarantee, and papering over it would silently break on a Proxmox minor-version bump. Callers that need to distinguish missing-snapshot from other task failures must substring-match locally.
+
 ### Guest Agent
 
 ```

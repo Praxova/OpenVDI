@@ -300,16 +300,31 @@ For non-Proxmox providers, handle allocation is the provider's concern; the `vmi
 
 ## VM Tagging Convention
 
-VDI-managed VMs are tagged for visibility and disaster recovery. All providers that support tags use the same tag keys:
+VDI-managed VMs are tagged for visibility and disaster recovery. Tags are discovery/UI metadata; the OpenVDI **database is authoritative**. The VM description field carries a human-readable `key=value` summary as a DR fallback for the cases where a username slugifies lossily (see below).
+
+**Proxmox constraint:** tag tokens must match `[a-z0-9_-]`. Colons and equals signs are rejected with HTTP 400 `invalid format - invalid characters in tag`. All tag values are lowercased and any character outside `[a-z0-9_-]` is replaced with `-`; runs of `-` are collapsed, and leading/trailing `-` are stripped. This slug transform is applied in a single helper shared across the code that writes tags.
+
+All providers that support tags use the same tag vocabulary:
 
 ```
-openvdi:managed
-openvdi:pool={pool_name}
-openvdi:type={persistent|nonpersistent}
-openvdi:assigned={username}      # only for assigned desktops
+openvdi-managed                  # always applied to every OpenVDI-managed desktop
+openvdi-pool-{pool_slug}         # always applied
+openvdi-type-{persistent|nonpersistent}   # always applied
+openvdi-user-{username_slug}     # only for assigned desktops (persistent or floating)
 ```
 
-Providers without native tag support either simulate tags in a provider-specific way or skip tagging (visibility-only degradation).
+**Constraints that fall out of this:**
+
+1. Pool names are validated at `POST /pools` / `PUT /pools` to match `[a-z0-9_-]` directly, so `pool_name == pool_slug` — no information loss on the pool dimension. Same pattern Kubernetes uses for resource names.
+2. Usernames are NOT constrained (AD/LDAP is authoritative; OpenVDI cannot dictate `sAMAccountName` format). The tag value is therefore lossy for usernames containing `.`, spaces, or non-ASCII characters. Recovery from tags alone gets e.g. `alton-bobbitt`; the unmodified `alton.bobbitt` is preserved in the VM description field.
+
+**VM description format** (set at provisioning time, freeform string — Proxmox does not validate its contents):
+
+```
+OpenVDI: pool=engineering type=nonpersistent assigned=alton.bobbitt
+```
+
+Providers without native tag support either simulate tags in a provider-specific way or skip tagging (visibility-only degradation). The description field is universal and every provider populates it.
 
 ## Notes
 

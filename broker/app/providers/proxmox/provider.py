@@ -1,10 +1,11 @@
 """Proxmox VE implementation of HypervisorProvider.
 
-Milestone 1 surface: capabilities, ping, close, list_nodes,
-get_node_status, list_storage, VM lifecycle (clone/start/stop/shutdown/
-destroy/status/list), guest agent (ping, get_users), console tickets
-(noVNC; SPICE stubbed), and task tracking. Snapshots and the remaining
-guest agent methods arrive in later prompts.
+M1 surface: capabilities, ping, close, list_nodes, get_node_status,
+list_storage, VM lifecycle (clone/start/stop/shutdown/destroy/status/
+list), guest agent (ping, get_users), console tickets (noVNC; SPICE
+stubbed), and task tracking.
+M2-05 adds: configure_vm + snapshot lifecycle (create/rollback/list/
+delete). Remaining guest agent methods arrive in later prompts.
 """
 from __future__ import annotations
 
@@ -25,10 +26,12 @@ from app.providers.base import (
     NoVNCTicket,
     PowerState,
     ProviderCapabilities,
+    SnapshotInfo,
     SpiceTicket,
     StorageInfo,
     TaskHandle,
     TaskStatus,
+    VMConfig,
     VMRef,
     VMStatus,
 )
@@ -278,6 +281,121 @@ class ProxmoxProvider:
             ref = make_vm_ref(node, int(d.get("vmid", 0)))
             out.append(_vm_status_from_dict(ref, d))
         return out
+
+    async def configure_vm(
+        self, ref: VMRef, config: VMConfig,
+    ) -> TaskHandle:
+        """Apply VMConfig to a Proxmox VM.
+
+        M2 always uses the async POST variant of /config, so the return
+        type is always a TaskHandle (the Protocol's `| None` covers
+        providers with synchronous config updates; Proxmox isn't one).
+
+        Unset fields are not sent. Passing `null` on this endpoint is
+        Proxmox's 'remove this key' signal — we never do that here;
+        omission is neutral.
+        """
+        node, vmid = unpack_vm_ref(ref)
+
+        body: dict[str, object] = {}
+        if config.name is not None:
+            body["name"] = config.name
+        if config.cpu_cores is not None:
+            body["cores"] = int(config.cpu_cores)
+        if config.memory_mb is not None:
+            body["memory"] = int(config.memory_mb)
+        if config.description is not None:
+            body["description"] = config.description
+        if config.tags is not None:
+            # Proxmox accepts tags as a semicolon-separated string on wire.
+            body["tags"] = ";".join(sorted(config.tags))
+        # provider_opts (e.g. net0, scsi0) pass through as-is, last so
+        # callers can override higher-level fields if they really need to.
+        if config.provider_opts:
+            for k, v in config.provider_opts.items():
+                if v is None:
+                    continue
+                body[k] = v
+
+        upid = await self._client._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/config", data=body,
+        )
+        return make_task_handle(node, upid)
+
+    # ── Snapshots ─────────────────────────────────────────────
+
+    async def create_snapshot(
+        self,
+        ref: VMRef,
+        name: str,
+        description: str | None = None,
+        include_ram: bool = False,
+    ) -> TaskHandle:
+        """POST /nodes/{node}/qemu/{vmid}/snapshot.
+
+        Snapshot-name conflicts surface as ProxmoxError; callers decide
+        whether to delete-then-recreate. vmstate=0 is sent explicitly
+        rather than omitted so we don't drift with server defaults.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        body: dict[str, object] = {
+            "snapname": name,
+            "vmstate": 1 if include_ram else 0,
+        }
+        if description is not None:
+            body["description"] = description
+        upid = await self._client._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/snapshot", data=body,
+        )
+        return make_task_handle(node, upid)
+
+    async def rollback_snapshot(self, ref: VMRef, name: str) -> TaskHandle:
+        """POST /nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback.
+
+        Rollback leaves the VM in whatever state the snapshot captured
+        — if the snapshot was taken while stopped, the VM ends up
+        stopped regardless of its pre-rollback state. Starting the VM
+        back up is the caller's problem.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        # URL-encode the snapshot name in case it contains unusual chars.
+        snap = _urlquote(name, safe="")
+        upid = await self._client._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/snapshot/{snap}/rollback",
+        )
+        return make_task_handle(node, upid)
+
+    async def list_snapshots(self, ref: VMRef) -> list[SnapshotInfo]:
+        """GET /nodes/{node}/qemu/{vmid}/snapshot.
+
+        Includes the synthetic 'current' entry (Proxmox always returns
+        it). Callers that want only real snapshots should filter by
+        `name != "current"` or `parent is not None`.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        raw = await self._client._request(
+            "GET", f"/nodes/{node}/qemu/{vmid}/snapshot",
+        )
+        items = raw if isinstance(raw, list) else []
+        out: list[SnapshotInfo] = []
+        for d in items:
+            if not isinstance(d, dict):
+                continue
+            out.append(_snapshot_info_from_dict(d))
+        return out
+
+    async def delete_snapshot(self, ref: VMRef, name: str) -> TaskHandle:
+        """DELETE /nodes/{node}/qemu/{vmid}/snapshot/{snapname}.
+
+        `force` is intentionally NOT passed. If cleanup fails that's a
+        signal for operator attention, not something to paper over.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        snap = _urlquote(name, safe="")
+        upid = await self._client._request(
+            "DELETE", f"/nodes/{node}/qemu/{vmid}/snapshot/{snap}",
+        )
+        return make_task_handle(node, upid)
 
     # ── Guest agent ───────────────────────────────────────────
 
@@ -538,4 +656,18 @@ def _vm_status_from_dict(ref: VMRef, d: dict) -> VMStatus:
         lock=d.get("lock"),
         tags=tags,
         raw=d,
+    )
+
+
+def _snapshot_info_from_dict(d: dict) -> SnapshotInfo:
+    # The synthetic 'current' entry has no snaptime, no parent, no
+    # vmstate — all defaults None / False. Real snapshots have
+    # snaptime (unix epoch int) and vmstate 0/1.
+    snaptime = d.get("snaptime")
+    return SnapshotInfo(
+        name=d.get("name", ""),
+        description=d.get("description") or None,
+        created_at=int(snaptime) if snaptime is not None else None,
+        parent=d.get("parent") or None,
+        includes_ram=bool(d.get("vmstate", 0)),
     )
