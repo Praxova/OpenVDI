@@ -5,7 +5,13 @@ Shared envelope + pagination live in .common; connect-flow and dashboard
 shapes are their own modules.
 """
 from app.schemas.audit import AuditRead
-from app.schemas.cluster import ClusterCreate, ClusterRead, ClusterUpdate
+from app.schemas.cluster import (
+    ClusterCreate,
+    ClusterRead,
+    ClusterReadWithNodes,
+    ClusterUpdate,
+    NodeInfoRead,
+)
 from app.schemas.common import (
     APIResponse,
     ErrorDetail,
@@ -16,26 +22,63 @@ from app.schemas.connect import (
     ConnectResponse,
     ConsoleTicketRead,
     NoVNCTicketRead,
+    RDPTicketRead,
+    SpiceTicketRead,
+    WebMKSTicketRead,
+    ticket_to_wire,
 )
 from app.schemas.dashboard import (
-    CapacityResponse,
+    CapacitySummary,
     DashboardSummary,
-    PoolCapacity,
+    PoolCapacityWithName,
+    PoolSummaryCounts,
+    ResourceStatusCounts,
+    SessionSummaryCounts,
 )
 from app.schemas.desktop import (
+    DesktopAssignRequest,
     DesktopCreate,
     DesktopListParams,
     DesktopRead,
+    DesktopReadDetailed,
     DesktopUpdate,
+    TaskAccepted,
 )
 from app.schemas.entitlement import (
     EntitlementCreate,
     EntitlementRead,
     EntitlementUpdate,
 )
-from app.schemas.pool import PoolCreate, PoolRead, PoolUpdate
-from app.schemas.session import SessionCreate, SessionRead, SessionUpdate
-from app.schemas.template import TemplateCreate, TemplateRead, TemplateUpdate
+from app.schemas.pool import (
+    DrainAccepted,
+    PoolCapacityDetail,
+    PoolCreate,
+    PoolDeleteAccepted,
+    PoolRead,
+    PoolReadDetailed,
+    PoolUpdate,
+    ProvisionAccepted,
+    ProvisionRequest,
+)
+from app.schemas.session import (
+    SessionCreate,
+    SessionRead,
+    SessionReadAdmin,
+    SessionReadDetailed,
+    SessionUpdate,
+)
+from app.schemas.user import (
+    UserDesktopView,
+    UserPoolView,
+    UserSessionView,
+)
+from app.schemas.template import (
+    TemplateCreate,
+    TemplateRead,
+    TemplateUpdate,
+    TemplateValidationResult,
+    ValidationCheck,
+)
 
 __all__ = [
     # common
@@ -46,23 +89,38 @@ __all__ = [
     # cluster
     "ClusterCreate",
     "ClusterRead",
+    "ClusterReadWithNodes",
     "ClusterUpdate",
+    "NodeInfoRead",
     # template
     "TemplateCreate",
     "TemplateRead",
     "TemplateUpdate",
+    "TemplateValidationResult",
+    "ValidationCheck",
     # pool
+    "DrainAccepted",
+    "PoolCapacityDetail",
     "PoolCreate",
+    "PoolDeleteAccepted",
     "PoolRead",
+    "PoolReadDetailed",
     "PoolUpdate",
+    "ProvisionAccepted",
+    "ProvisionRequest",
     # desktop
+    "DesktopAssignRequest",
     "DesktopCreate",
     "DesktopListParams",
     "DesktopRead",
+    "DesktopReadDetailed",
     "DesktopUpdate",
+    "TaskAccepted",
     # session
     "SessionCreate",
     "SessionRead",
+    "SessionReadAdmin",
+    "SessionReadDetailed",
     "SessionUpdate",
     # entitlement
     "EntitlementCreate",
@@ -74,8 +132,19 @@ __all__ = [
     "ConnectResponse",
     "ConsoleTicketRead",
     "NoVNCTicketRead",
+    "RDPTicketRead",
+    "SpiceTicketRead",
+    "WebMKSTicketRead",
+    "ticket_to_wire",
+    # user views
+    "UserDesktopView",
+    "UserPoolView",
+    "UserSessionView",
     # dashboard
-    "CapacityResponse",
+    "CapacitySummary",
     "DashboardSummary",
-    "PoolCapacity",
+    "PoolCapacityWithName",
+    "PoolSummaryCounts",
+    "ResourceStatusCounts",
+    "SessionSummaryCounts",
 ]

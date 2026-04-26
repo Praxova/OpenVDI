@@ -1,23 +1,24 @@
-"""Dev-mode header-based auth middleware.
+"""Dev-mode header-based auth middleware — pure ASGI.
 
-Attaches a `User` to `request.state.user` for every request except a
-small bypass list (`/health`, `/docs`, `/openapi.json`, `/redoc`,
-`/docs/*`). Missing `X-Dev-User` → 401. Invalid `X-Dev-Role` → 400.
-Everything else is permissive (missing groups → empty tuple).
+Reads X-Dev-User / X-Dev-Groups / X-Dev-Role from the ASGI scope and
+stashes a `User` on `scope["state"]["user"]`. Short-circuits with
+401 (missing user) or 400 (malformed role) for non-bypass paths.
+Bypasses /health, /docs, /openapi.json, /redoc, and /docs/* with no
+auth checks.
 
-Register in the FastAPI app. Middleware order matters in Starlette
-(last-added runs outermost): add this BEFORE the audit middleware so
-`request.state.user` is set when audit reads it.
+Pure ASGI rather than `BaseHTTPMiddleware` — the latter has broken
+exception-handling semantics that cause validation errors (and other
+handler-raised exceptions) to surface as HTTP 500 even when FastAPI's
+exception handlers produce correct responses. See Starlette issue
+#1175 and docs/prompts/m2-11-fix-asgi-middleware.md for the details.
 
-Header → JWT cutover (M4) replaces only this module and
-`auth_service.py`'s header parsers; everything downstream keeps its
-interface.
+Header → JWT cutover (M4) replaces only this module; everything
+downstream continues to read `request.state.user` unchanged.
 """
 from __future__ import annotations
 
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+import json
+import logging
 
 from app.services.auth_service import (
     User,
@@ -26,58 +27,119 @@ from app.services.auth_service import (
 )
 
 
-# Paths that skip auth entirely. FastAPI's /docs subtree mounts
-# additional static paths under /docs/; the startswith covers those.
-_BYPASS_EXACT: frozenset[str] = frozenset({
+logger = logging.getLogger(__name__)
+
+
+# Paths that bypass auth entirely. Kept identical to M2-10's list.
+_BYPASS_PATHS: frozenset[str] = frozenset({
     "/health",
     "/docs",
     "/openapi.json",
     "/redoc",
 })
+_BYPASS_PREFIXES: tuple[str, ...] = ("/docs/",)
 
 
-def _is_bypassed(path: str) -> bool:
-    return path in _BYPASS_EXACT or path.startswith("/docs/")
+def _get_header(scope: dict, name: str) -> str:
+    """Fetch a header value from an ASGI scope.
+
+    Returns the empty string if the header is absent. Header names are
+    matched case-insensitively (HTTP requirement). Values are decoded
+    from raw bytes as latin-1, which is Starlette's internal convention
+    — for ASCII values (the normal case for the headers we read) this
+    produces the same result as UTF-8; for rare non-ASCII bytes it at
+    least preserves them losslessly.
+    """
+    target = name.lower().encode("latin-1")
+    for key, value in scope.get("headers", []):
+        if key.lower() == target:
+            return value.decode("latin-1")
+    return ""
 
 
-class DevAuthMiddleware(BaseHTTPMiddleware):
-    """Extract X-Dev-* headers and attach a User to request.state."""
+async def _send_json_response(send, status_code: int, body: dict) -> None:
+    """Emit a JSONResponse-equivalent via raw ASGI.
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint,
-    ) -> Response:
-        if _is_bypassed(request.url.path):
-            return await call_next(request)
+    Used when the middleware rejects the request before calling the
+    inner app (401 missing user, 400 malformed role).
+    """
+    payload = json.dumps(body).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": status_code,
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(payload)).encode("ascii")),
+        ],
+    })
+    await send({
+        "type": "http.response.body",
+        "body": payload,
+        "more_body": False,
+    })
 
-        username = request.headers.get("X-Dev-User", "").strip()
+
+class DevAuthMiddleware:
+    """Pure-ASGI DevAuth. Shape:
+
+        __init__(self, app)           # Starlette/FastAPI calls this once
+        __call__(self, scope, receive, send)  # one per request
+
+    No BaseHTTPMiddleware, no Request/Response objects at the boundary.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive, send) -> None:
+        # Only HTTP traffic is subject to auth. Websocket and lifespan
+        # scopes pass through unchanged.
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if (
+            path in _BYPASS_PATHS
+            or any(path.startswith(p) for p in _BYPASS_PREFIXES)
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        username = _get_header(scope, "X-Dev-User").strip()
         if not username:
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "data": None,
-                    "error": {
-                        "code": "UNAUTHORIZED",
-                        "message": "X-Dev-User header required (M2 dev mode)",
-                    },
+            await _send_json_response(send, 401, {
+                "data": None,
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "X-Dev-User header required (M2 dev mode)",
                 },
-            )
+            })
+            return
 
         try:
-            role = parse_role_header(request.headers.get("X-Dev-Role"))
+            role = parse_role_header(_get_header(scope, "X-Dev-Role") or None)
         except ValueError as exc:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "data": None,
-                    "error": {
-                        "code": "INVALID_REQUEST",
-                        "message": str(exc),
-                    },
+            await _send_json_response(send, 400, {
+                "data": None,
+                "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": str(exc),
                 },
-            )
+            })
+            return
 
-        groups = parse_groups_header(request.headers.get("X-Dev-Groups"))
-        request.state.user = User(
+        groups = parse_groups_header(
+            _get_header(scope, "X-Dev-Groups") or None
+        )
+
+        # FastAPI's `request.state` is a view onto scope["state"]; the
+        # State object is initialized on first attribute access. We
+        # write to the underlying dict directly so downstream readers
+        # (including our AuditMiddleware) see the user immediately.
+        state = scope.setdefault("state", {})
+        state["user"] = User(
             username=username, groups=groups, role=role,
         )
-        return await call_next(request)
+
+        await self.app(scope, receive, send)

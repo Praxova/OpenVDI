@@ -51,3 +51,12 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
         raise
     finally:
         await session.close()
+
+
+async def dispose_engine() -> None:
+    """Close all connections in the async engine's pool.
+
+    Called from the FastAPI lifespan on shutdown so outstanding DB
+    connections don't block clean termination of the event loop.
+    """
+    await engine.dispose()

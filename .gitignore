@@ -4,6 +4,12 @@
 *.pem
 *.key
 
+# Packer build secrets — also covered by infra/packer/*/.gitignore but
+# pinned at the project level for defense in depth.
+credentials.auto.pkrvars.hcl
+*.pkrvars.hcl
+!*.pkrvars.hcl.example
+
 # Claude Code working files
 CLAUDE.md
 docs/prompts/

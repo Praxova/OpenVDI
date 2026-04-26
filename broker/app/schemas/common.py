@@ -42,7 +42,7 @@ class PaginationParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    limit: int = Field(50, ge=1, le=500)
+    limit: int = Field(50, ge=1, le=200)
     offset: int = Field(0, ge=0)
     sort: str | None = None
     order: Literal["asc", "desc"] = "asc"
