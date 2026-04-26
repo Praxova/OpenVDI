@@ -42,10 +42,15 @@ class Session(Base):
         primary_key=True,
         server_default=func.gen_random_uuid(),
     )
-    desktop_id: Mapped[uuid.UUID] = mapped_column(
+    # Nullable + ON DELETE SET NULL (M2-15-fix-2): when a desktop is
+    # destroyed, its session rows survive with desktop_id=NULL so the
+    # continuous-state fields (protocol, durations, future telemetry)
+    # remain queryable for M3 user-history views and M4 reporting.
+    # See docs/database-schema.md → Notes.
+    desktop_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("desktops.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("desktops.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     username: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -68,11 +73,25 @@ class Session(Base):
 
     # Serialized ConsoleTicket. Cleared on session end so tickets don't
     # outlive the connection they authorize.
-    connection_info: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    #
+    # JSONB(none_as_null=True): when the Python attribute is set to None,
+    # write SQL NULL — NOT JSON literal `null`. Without this, SQLAlchemy's
+    # default binding stores `'null'::jsonb` and `WHERE connection_info IS
+    # NULL` queries miss every cleared row. See docs/database-schema.md →
+    # Notes for the convention; transition_to_ended also uses sql_null()
+    # at the assignment site as defense-in-depth.
+    connection_info: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True),
+    )
 
-    # Guest agent telemetry (populated by the session monitor worker).
+    # Guest agent telemetry (populated by M4's session monitor worker).
+    # `none_as_null=True` is preemptive — if M4 ever clears this on
+    # session end, the column already does the right thing. Same
+    # convention as connection_info above.
     os_user: Mapped[str | None] = mapped_column(String(256))
-    os_info: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    os_info: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True),
+    )
     vm_ip_address: Mapped[str | None] = mapped_column(INET)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     idle_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -81,6 +100,6 @@ class Session(Base):
         DateTime(timezone=True), server_default=func.now(),
     )
 
-    desktop: Mapped["Desktop"] = relationship(
+    desktop: Mapped["Desktop | None"] = relationship(
         back_populates="sessions", lazy="noload",
     )

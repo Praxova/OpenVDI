@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, null as sql_null, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Desktop, DesktopStatus, Session, SessionStatus
@@ -117,7 +117,12 @@ async def transition_to_ended(
 
     session_row.status = SessionStatus.ENDED
     session_row.ended_at = func.now()
-    session_row.connection_info = None
+    # sql_null() instead of Python None: SQLAlchemy's default JSONB
+    # binding turns `None` into JSON literal `null` (a 3-character JSON
+    # value), which makes `WHERE connection_info IS NULL` miss this row.
+    # The model also declares JSONB(none_as_null=True) for defense in
+    # depth — see docs/database-schema.md → Notes for the convention.
+    session_row.connection_info = sql_null()
 
     # Mutate the desktop per its assignment_type. We fetch fresh rather
     # than trusting session_row.desktop (lazy="noload" per M2-03 — a

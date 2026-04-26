@@ -70,7 +70,7 @@ CREATE TABLE templates (
 -- ============================================================
 CREATE TYPE pool_type AS ENUM ('persistent', 'nonpersistent');
 CREATE TYPE pool_status AS ENUM (
-    'active', 'disabled', 'provisioning', 'error', 'draining'
+    'active', 'disabled', 'provisioning', 'error', 'draining', 'deleting'
 );
 
 CREATE TABLE pools (
@@ -167,6 +167,11 @@ CREATE TABLE desktops (
     -- Provider async task tracking. For Proxmox: the UPID.
     -- For other providers: their native async task identifier.
     pve_task_upid   VARCHAR(512),
+    -- Kind of the in-flight task, matches DesktopTaskKind enum values
+    -- in broker/app/services/task_tracker.py (provision, destroy,
+    -- rebuild, start, shutdown, stop). NULL when no task is in flight.
+    -- Persisted so the broker can resume polling after restart.
+    pve_task_kind   VARCHAR(32),
 
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now(),
@@ -182,7 +187,12 @@ CREATE TYPE session_status AS ENUM (
 
 CREATE TABLE sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    desktop_id      UUID NOT NULL REFERENCES desktops(id),
+    -- Nullable + ON DELETE SET NULL (M2-15-fix-2): when a desktop is
+    -- destroyed, its session rows survive with desktop_id=NULL so the
+    -- continuous-state fields (protocol, durations, future telemetry)
+    -- remain queryable for M3 user-history views and M4 reporting. See
+    -- docs/database-schema.md → Notes for the convention.
+    desktop_id      UUID REFERENCES desktops(id) ON DELETE SET NULL,
     username        VARCHAR(256) NOT NULL,
     protocol        VARCHAR(32) NOT NULL,         -- novnc, spice, kasmvnc, webmks, rdp
     client_ip       INET,
@@ -211,7 +221,11 @@ CREATE TABLE sessions (
 -- ============================================================
 CREATE TABLE entitlements (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    pool_id         UUID NOT NULL REFERENCES pools(id),
+    -- ON DELETE CASCADE (M2-15-fix-3): entitlements are operational
+    -- scope under a pool with no per-grant continuous-state fields,
+    -- so they ride along automatically when the pool is destroyed.
+    -- Grant/revoke history lives in audit_log (FK-independent).
+    pool_id         UUID NOT NULL REFERENCES pools(id) ON DELETE CASCADE,
     principal_type  VARCHAR(32) NOT NULL,         -- 'user' or 'group'
     principal_name  VARCHAR(256) NOT NULL,        -- AD user or group name
     created_at      TIMESTAMPTZ DEFAULT now(),

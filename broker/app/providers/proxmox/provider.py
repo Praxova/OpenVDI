@@ -140,9 +140,29 @@ class ProxmoxProvider:
     async def clone_vm(self, req: CloneRequest) -> TaskHandle:
         """Clone a Proxmox template into a new VM.
 
-        Linked-clone-from-template is the only mode — Proxmox's default
-        when the source is a template. `full` and `snapname` are never
-        sent (see docs/architecture.md → Cloning Model).
+        Linked-clone-from-template is the only mode in M2 — Proxmox's
+        default when the source is a template. `full` and `snapname` are
+        never sent (see docs/architecture.md → Cloning Model).
+
+        We pre-verify the source is a template via get_vm_status. The
+        contract from architecture.md says it MUST be one, but the
+        contract is unenforceable at the type level — an accidental
+        non-template source would surface as a confusing Proxmox error
+        downstream. Catching it here costs one extra HTTP roundtrip on
+        a multi-second operation.
+
+        `target_storage` is silently OMITTED when the source is a
+        template. Linked clones share the template's disk and Proxmox
+        rejects any `storage` parameter on a linked-clone request with
+        HTTP 500 ("parameter 'storage' not allowed for linked clones").
+        Schema-side rejection also lands in `app/schemas/pool.py` so
+        the API never even accepts a target_storage; this provider-side
+        omission is defense-in-depth for any caller bypassing the
+        schema.
+
+        When full-clone support arrives (M3+), CloneRequest gains a
+        `full_clone: bool` field and the storage condition becomes
+        `req.target_storage and (req.full_clone or not source.is_template)`.
         """
         src_node, src_vmid = unpack_vm_ref(req.source_ref)
 
@@ -155,14 +175,28 @@ class ProxmoxProvider:
                 provider_type="proxmox",
             )
 
+        # Pre-check: source MUST be a template per architecture.md →
+        # Cloning Model.
+        source_status = await self.get_vm_status(req.source_ref)
+        if not source_status.is_template:
+            raise ProviderCapabilityError(
+                f"clone_vm requires a template source; "
+                f"VM {src_vmid} on node {src_node} is not a template",
+                provider_type="proxmox",
+            )
+
         body = {
             "newid": int(newid),
             "name": req.new_name,
-            "storage": req.target_storage,
             "pool": req.target_pool,
             "target_node": req.target_node,
             "description": req.description,
         }
+        # Storage handling — see docstring. Linked clones from templates
+        # cannot relocate; non-template sources (M3+ full clones) can.
+        if req.target_storage and not source_status.is_template:
+            body["storage"] = req.target_storage
+
         upid = await self._client._request(
             "POST",
             f"/nodes/{src_node}/qemu/{src_vmid}/clone",

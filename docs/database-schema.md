@@ -111,7 +111,9 @@ CREATE TABLE pools (
 
     -- Placement
     target_nodes    VARCHAR(512),                -- comma-sep node list, null = any
-    target_storage  VARCHAR(128),                -- storage for clones, null = same as template
+    target_storage  VARCHAR(128),                -- reserved for future full-clone support;
+                                                  -- M2 rejects non-null at the API layer
+                                                  -- (linked clones inherit template storage)
 
     -- VM overrides (null = inherit from template)
     cpu_cores       INTEGER,
@@ -312,6 +314,8 @@ openvdi-pool-{pool_slug}         # always applied
 openvdi-type-{persistent|nonpersistent}   # always applied
 openvdi-user-{username_slug}     # only for assigned desktops (persistent or floating)
 ```
+```
+```
 
 **Constraints that fall out of this:**
 
@@ -332,6 +336,9 @@ Providers without native tag support either simulate tags in a provider-specific
 - `clusters.status` values: `pending` (pre-first-ping: newly registered or just updated; awaiting background health check), `active` (last ping succeeded), `maintenance` (admin-disabled), `offline` (last ping failed). Transitions: `pending → active | offline` on first ping completion; `active ↔ offline` on subsequent ping outcomes; `* → maintenance` on admin action.
 - `desktops.assigned_user` semantics: populated for both persistent and non-persistent desktops while a session is active. On session end, `assignment_type='floating'` desktops have `assigned_user` cleared (the desktop returns to the available pool); `assignment_type='persistent'` desktops retain `assigned_user`. Per-pool assignment applies — a user may simultaneously hold one desktop per pool they are entitled to.
 - `connection_info` in sessions is ephemeral — cleared when session ends to avoid leaking tickets. The shape is a `ConsoleTicket` (see `providers.md`) serialized to JSON; the portal reads the `kind` field to route to the correct renderer.
+- **JSONB columns that can be cleared after population MUST be declared with `JSONB(none_as_null=True)`.** SQLAlchemy's default binding writes Python `None` as JSON literal `null` (a 3-character JSON value), not SQL `NULL`. This breaks `WHERE col IS NULL` queries on those rows. The convention is: declare with `none_as_null=True` at the model level AND assign `sqlalchemy.null()` (not Python `None`) at the clearing site. Defense in depth — either fix alone is sufficient; both together prevent regressions. Currently applies to `sessions.connection_info` and `sessions.os_info`. New JSONB columns that can be cleared follow the same convention.
+- **`sessions.desktop_id` is nullable with `ON DELETE SET NULL`.** When a desktop is destroyed (admin DELETE, pool delete, or rebuild leg one), its session rows persist with `desktop_id` set to NULL — the row's continuous-state fields (`protocol`, `connected_at`, `disconnected_at`, `ended_at`, M4's heartbeat / idle / telemetry) survive the desktop's destruction so M3 user-history views and M4 reporting can read them. Endpoints that join sessions to desktops/pools (`/me/sessions`, `/sessions`) use LEFT OUTER joins; orphaned sessions surface with `desktop_name` / `pool_name` rendered as null. `audit_log` (events, not state) is independent and unaffected.
+- **`entitlements.pool_id` is `ON DELETE CASCADE`.** When a pool is destroyed, its entitlement rows are dropped along with it. Entitlements are operational scope ("principal X is allowed to connect to pool Y") with no per-grant continuous-state fields and no referent once the pool is gone. The grant/revoke lifecycle is preserved in `audit_log` (HTTP middleware writes a row for every POST/DELETE on `/pools/{id}/entitlements/...`), which is FK-independent.
 - `session_metrics` table is for future OpenVDI in-VM agent; not used in MVP.
 - All timestamps are TIMESTAMPTZ (UTC).
 - The Proxmox-flavored column names (`pve_vmid`, `pve_node`, `pve_task_upid`, `pve_pool_id`) are retained for the v0 single-provider case. When a second provider lands, these columns will be either renamed (generic) or moved into per-desktop JSONB — decided based on what the second provider's data model looks like, not speculatively.
