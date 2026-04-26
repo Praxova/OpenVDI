@@ -1,0 +1,40 @@
+/*
+ * Praxova design tokens — load FIRST so every CSS custom property is in
+ * scope before any Tailwind-emitted rule references it. Per ST5.
+ */
+@import "./praxova/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * App globals. Keep this section thin — anything that wants Tailwind
+ * utilities should use them in JSX rather than landing here.
+ */
+html {
+  /* Default font features for Inter — better default 1 and a glyphs. */
+  font-feature-settings: var(--font-features-default);
+}
+
+body {
+  /*
+   * Body wears the page background and the body type. Tailwind's body
+   * default is font-family: <theme.fontFamily.sans>, which we already
+   * pointed at var(--font-body), so this is belt-and-suspenders.
+   */
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line-height);
+}
+
+/*
+ * Tabular numerals utility — apply to <table>, dashboard counters, time
+ * displays. Not applied globally because Inter's proportional digits read
+ * better in prose. Per design-system.md §3.3.
+ */
+.font-tabular {
+  font-feature-settings: var(--font-features-tabular);
+}

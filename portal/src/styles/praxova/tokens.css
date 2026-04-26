@@ -1,0 +1,499 @@
+/* ============================================================================
+ *  Praxova Design Tokens — v0.1.0
+ *  https://praxova.ai
+ *
+ *  Canonical CSS custom property definitions for the Praxova design system.
+ *  Both Blazor (IT Agent) and React/TypeScript (OpenVDI, future products)
+ *  portals consume this file unmodified — it is the single source of truth.
+ *
+ *  Conventions
+ *  -----------
+ *  - Token names are SEMANTIC, never raw scale names. Components reference
+ *    --color-action-primary, never --gold-500. Roles, not values.
+ *  - Color values use OKLCH for perceptual uniformity and predictable mode
+ *    interpolation. Hex equivalents are documented in design-system.md for
+ *    asset tools that do not support OKLCH (Photoshop, ImageMagick, etc.).
+ *  - Light mode is the :root baseline. Dark mode opt-in via
+ *    [data-theme="dark"] on <html> or any ancestor element.
+ *  - Both modes are first-class. WCAG AA (4.5:1 body / 3:1 large) verified
+ *    for every documented text-on-surface pair.
+ *  - Any deviation from these tokens inside a component is a bug, not a
+ *    feature.
+ *
+ *  Versioning: semver. Breaking changes (token rename/removal/value change
+ *  that alters visual appearance) bump MAJOR.
+ * ============================================================================ */
+
+
+/* ----------------------------------------------------------------------------
+ * 0. Font imports
+ *
+ *  Outfit          — display & headlines (geometric, branded)
+ *  Inter           — body & UI (screen-optimized, excellent tabular numerals)
+ *  JetBrains Mono  — code & terminal output
+ *
+ *  Hosted via Google Fonts. Self-host by downloading and replacing this
+ *  @import block with @font-face declarations pointing at /fonts/. Do not
+ *  change the weights served — components depend on the weights below.
+ * -------------------------------------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+
+/* ============================================================================
+ * 1. Brand primitives
+ * ----------------------------------------------------------------------------
+ *  These are the raw brand values. Components NEVER reference these directly
+ *  — they reference the semantic tokens in section 2. Primitives exist so the
+ *  brand can be re-tuned in one place and propagate everywhere.
+ * ========================================================================== */
+:root {
+  /* Gold — brand accent.
+     Hue 78 sits in the warm-yellow band, chroma 0.13 keeps it readably
+     muted (true gold, not neon). All four gold steps share hue/chroma
+     and walk the lightness axis for predictable contrast. */
+  --brand-gold:        oklch(70.0% 0.130 78);   /* #C8963C — primary */
+  --brand-gold-light:  oklch(76.5% 0.130 80);   /* #DEB058 — hover/highlight */
+  --brand-gold-dim:    oklch(53.5% 0.100 75);   /* #8B6B2A — text-on-light */
+  --brand-gold-pale:   oklch(87.0% 0.060 85);   /* #E8D5A8 — subtle bg */
+
+  /* Neutrals — warm-cool-balanced near-blacks and near-whites.
+     Hue ~285 (deep blue-gray) for darks, hue ~90 (warm) for lights.
+     The slight warmth in the lights complements the gold without
+     reading as "cream." */
+  --brand-black:       oklch(13.0% 0.005 285);  /* #09090B */
+  --brand-zinc-950:    oklch(17.5% 0.005 285);  /* #111113 */
+  --brand-zinc-900:    oklch(20.5% 0.005 285);  /* #18181B */
+  --brand-zinc-850:    oklch(23.0% 0.005 285);  /* #1C1C1F */
+  --brand-zinc-800:    oklch(28.5% 0.006 285);  /* #27272A */
+  --brand-zinc-600:    oklch(53.0% 0.013 286);  /* #71717A */
+  --brand-zinc-500:    oklch(60.5% 0.013 286);  /* #898993 */
+  --brand-zinc-400:    oklch(70.5% 0.014 286);  /* #A1A1AA */
+  --brand-zinc-300:    oklch(80.0% 0.011 286);  /* #C4C4CB */
+  --brand-zinc-200:    oklch(88.0% 0.008 286);  /* #DCDCE0 */
+  --brand-zinc-100:    oklch(94.0% 0.005 286);  /* #EDEDF0 */
+  --brand-stone-100:   oklch(91.0% 0.004 90);   /* #E4E4E0 */
+  --brand-stone-50:    oklch(96.5% 0.003 90);   /* #F4F4F2 */
+  --brand-white:       oklch(98.5% 0.001 90);   /* #FAFAF9 */
+
+  /* State hues — chosen to differentiate cleanly from the brand gold.
+     Warning is pushed toward orange (hue 50) to avoid reading as gold. */
+  --brand-success-500: oklch(56.0% 0.150 150);  /* #2D9658 */
+  --brand-success-300: oklch(76.0% 0.140 150);  /* #6FCB94 */
+  --brand-success-100: oklch(94.0% 0.045 150);  /* #DDF2E5 */
+  --brand-warning-500: oklch(70.0% 0.165 50);   /* #DA8B30 */
+  --brand-warning-300: oklch(82.0% 0.150 55);   /* #F1B071 */
+  --brand-warning-100: oklch(94.0% 0.060 70);   /* #F5E5C8 */
+  --brand-danger-500:  oklch(58.0% 0.205 25);   /* #C7402C */
+  --brand-danger-300:  oklch(75.0% 0.165 25);   /* #E88472 */
+  --brand-danger-100:  oklch(94.0% 0.040 25);   /* #F5DAD3 */
+  --brand-info-500:    oklch(58.0% 0.195 240);  /* #2C70C7 */
+  --brand-info-300:    oklch(75.0% 0.150 240);  /* #74A6E1 */
+  --brand-info-100:    oklch(94.0% 0.040 240);  /* #D6E4F4 */
+}
+
+
+/* ============================================================================
+ * 2. Semantic tokens — LIGHT MODE (baseline)
+ * ----------------------------------------------------------------------------
+ *  This is what components reference. Light mode lives on :root so that any
+ *  component used outside an app shell still renders coherently.
+ * ========================================================================== */
+:root {
+  /* --- Surfaces (elevation layers) --- */
+  --color-bg:                var(--brand-white);       /* page background */
+  --color-surface-1:         var(--brand-stone-50);    /* cards, panels */
+  --color-surface-2:         var(--brand-stone-100);   /* nested surfaces */
+  --color-surface-3:         var(--brand-zinc-200);    /* highest elevation */
+  --color-surface-overlay:   oklch(13.0% 0.005 285 / 0.50);  /* modal scrim */
+
+  /* --- Text --- */
+  --color-text-primary:      var(--brand-zinc-900);    /* body text */
+  --color-text-secondary:    oklch(38.0% 0.010 285);   /* supporting copy */
+  --color-text-tertiary:     var(--brand-zinc-600);    /* labels, captions */
+  --color-text-disabled:     var(--brand-zinc-400);
+  --color-text-inverse:      var(--brand-white);       /* text on dark surfaces */
+  --color-text-on-accent:    var(--brand-black);       /* text on gold */
+
+  /* --- Borders --- */
+  --color-border-subtle:     var(--brand-stone-100);
+  --color-border-default:    var(--brand-zinc-200);
+  --color-border-strong:     var(--brand-zinc-400);
+  --color-border-focus:      var(--brand-gold);
+
+  /* --- Action / Interactive --- */
+  --color-action-primary:        var(--brand-gold);
+  --color-action-primary-hover:  oklch(67.0% 0.135 78);
+  --color-action-primary-active: oklch(63.5% 0.140 75);
+  --color-action-primary-text:   var(--brand-gold-dim); /* gold-as-text on light */
+
+  --color-action-secondary:        var(--brand-zinc-900);
+  --color-action-secondary-hover:  var(--brand-zinc-800);
+  --color-action-secondary-active: var(--brand-black);
+  --color-action-secondary-text:   var(--brand-white);
+
+  --color-action-ghost-hover:    var(--brand-stone-100);
+  --color-action-ghost-active:   var(--brand-zinc-200);
+
+  /* --- Selection / state overlays --- */
+  --color-state-hover:       oklch(13.0% 0.005 285 / 0.04);
+  --color-state-active:      oklch(13.0% 0.005 285 / 0.08);
+  --color-state-selected:    oklch(70.0% 0.130 78 / 0.10);
+
+  /* --- Status (paired bg / fg / border per state) --- */
+  --color-success-bg:        var(--brand-success-100);
+  --color-success-fg:        oklch(38.0% 0.140 150);
+  --color-success-border:    oklch(78.0% 0.110 150);
+  --color-success-solid:     var(--brand-success-500);
+
+  --color-warning-bg:        var(--brand-warning-100);
+  --color-warning-fg:        oklch(45.0% 0.150 50);
+  --color-warning-border:    oklch(80.0% 0.130 55);
+  --color-warning-solid:     var(--brand-warning-500);
+
+  --color-danger-bg:         var(--brand-danger-100);
+  --color-danger-fg:         oklch(43.0% 0.190 25);
+  --color-danger-border:     oklch(78.0% 0.130 25);
+  --color-danger-solid:      var(--brand-danger-500);
+
+  --color-info-bg:           var(--brand-info-100);
+  --color-info-fg:           oklch(43.0% 0.180 240);
+  --color-info-border:       oklch(78.0% 0.115 240);
+  --color-info-solid:        var(--brand-info-500);
+
+  /* --- Code blocks (treated as their own surface) --- */
+  --color-code-bg:           var(--brand-stone-100);
+  --color-code-text:         var(--brand-zinc-900);
+  --color-code-border:       var(--brand-zinc-200);
+}
+
+
+/* ============================================================================
+ * 3. Semantic tokens — DARK MODE
+ * ----------------------------------------------------------------------------
+ *  Opt-in via [data-theme="dark"]. Same role names, different values.
+ *  Components do not change. Verified for WCAG AA throughout.
+ * ========================================================================== */
+[data-theme="dark"] {
+  /* --- Surfaces (dark mode elevates by lightening, not by shadow) --- */
+  --color-bg:                var(--brand-black);
+  --color-surface-1:         var(--brand-zinc-950);
+  --color-surface-2:         var(--brand-zinc-900);
+  --color-surface-3:         var(--brand-zinc-850);
+  --color-surface-overlay:   oklch(0% 0 0 / 0.65);
+
+  /* --- Text --- */
+  --color-text-primary:      var(--brand-white);
+  --color-text-secondary:    var(--brand-zinc-400);
+  --color-text-tertiary:     var(--brand-zinc-600);
+  --color-text-disabled:     oklch(40.0% 0.010 285);
+  --color-text-inverse:      var(--brand-black);
+  --color-text-on-accent:    var(--brand-black);  /* gold is dark enough */
+
+  /* --- Borders --- */
+  --color-border-subtle:     var(--brand-zinc-900);
+  --color-border-default:    var(--brand-zinc-800);
+  --color-border-strong:     var(--brand-zinc-600);
+  --color-border-focus:      var(--brand-gold-light);
+
+  /* --- Action / Interactive --- */
+  --color-action-primary:        var(--brand-gold);
+  --color-action-primary-hover:  var(--brand-gold-light);
+  --color-action-primary-active: oklch(73.0% 0.135 80);
+  --color-action-primary-text:   var(--brand-gold-light);  /* gold-as-text on dark */
+
+  --color-action-secondary:        var(--brand-zinc-800);
+  --color-action-secondary-hover:  var(--brand-zinc-600);
+  --color-action-secondary-active: var(--brand-zinc-400);
+  --color-action-secondary-text:   var(--brand-white);
+
+  --color-action-ghost-hover:    oklch(98.5% 0.001 90 / 0.06);
+  --color-action-ghost-active:   oklch(98.5% 0.001 90 / 0.10);
+
+  /* --- Selection / state overlays --- */
+  --color-state-hover:       oklch(98.5% 0.001 90 / 0.04);
+  --color-state-active:      oklch(98.5% 0.001 90 / 0.08);
+  --color-state-selected:    oklch(70.0% 0.130 78 / 0.16);
+
+  /* --- Status --- */
+  --color-success-bg:        oklch(22.0% 0.060 150);
+  --color-success-fg:        oklch(80.0% 0.140 150);
+  --color-success-border:    oklch(38.0% 0.110 150);
+  --color-success-solid:     var(--brand-success-500);
+
+  --color-warning-bg:        oklch(24.0% 0.075 60);
+  --color-warning-fg:        oklch(82.0% 0.140 60);
+  --color-warning-border:    oklch(42.0% 0.115 55);
+  --color-warning-solid:     var(--brand-warning-500);
+
+  --color-danger-bg:         oklch(24.0% 0.090 25);
+  --color-danger-fg:         oklch(78.0% 0.165 25);
+  --color-danger-border:     oklch(42.0% 0.140 25);
+  --color-danger-solid:      var(--brand-danger-500);
+
+  --color-info-bg:           oklch(24.0% 0.085 240);
+  --color-info-fg:           oklch(78.0% 0.140 240);
+  --color-info-border:       oklch(42.0% 0.130 240);
+  --color-info-solid:        var(--brand-info-500);
+
+  /* --- Code blocks --- */
+  --color-code-bg:           var(--brand-zinc-950);
+  --color-code-text:         var(--brand-zinc-200);
+  --color-code-border:       var(--brand-zinc-800);
+}
+
+
+/* ============================================================================
+ * 4. Typography
+ * ----------------------------------------------------------------------------
+ *  Modular scale, ratio 1.25. font-feature-settings enable tabular numerals
+ *  on Inter for data-heavy contexts (ticket tables, VM lists). Outfit is
+ *  reserved for display sizes — it shines at large; Inter is sturdier in
+ *  the 12-18px body range that dominates app UI.
+ * ========================================================================== */
+:root {
+  /* Families */
+  --font-display:  'Outfit', system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-body:     'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-mono:     'JetBrains Mono', ui-monospace, SF Mono, Menlo, monospace;
+
+  /* OpenType features. Apply to <body> and any tabular contexts. */
+  --font-features-default:  'cv11', 'ss01';                /* Inter: nicer 1, alt a */
+  --font-features-tabular:  'tnum', 'cv11', 'ss01';        /* fixed-width digits */
+
+  /* Sizes (modular scale, base 16px, ratio 1.25) */
+  --text-display-lg-size:   3.815rem;   /* 61.04px */
+  --text-display-md-size:   3.052rem;   /* 48.83px */
+  --text-display-sm-size:   2.441rem;   /* 39.06px */
+  --text-h1-size:           1.953rem;   /* 31.25px */
+  --text-h2-size:           1.563rem;   /* 25.00px */
+  --text-h3-size:           1.250rem;   /* 20.00px */
+  --text-h4-size:           1.125rem;   /* 18.00px */
+  --text-body-lg-size:      1.063rem;   /* 17.00px */
+  --text-body-size:         0.938rem;   /* 15.00px */
+  --text-body-sm-size:      0.875rem;   /* 14.00px */
+  --text-caption-size:      0.813rem;   /* 13.00px */
+  --text-label-size:        0.750rem;   /* 12.00px */
+  --text-code-size:         0.875rem;   /* 14.00px */
+
+  /* Line heights — tighter for display, looser for body */
+  --text-display-line-height: 1.05;
+  --text-heading-line-height: 1.20;
+  --text-body-line-height:    1.55;
+  --text-tight-line-height:   1.30;
+
+  /* Letter spacing — Outfit tracks looser at all-caps display sizes */
+  --text-display-tracking:    0.04em;
+  --text-heading-tracking:    0.01em;
+  --text-body-tracking:       0;
+  --text-label-tracking:      0.10em;   /* uppercase labels */
+
+  /* Weights */
+  --font-weight-regular:   400;
+  --font-weight-medium:    500;
+  --font-weight-semibold:  600;
+  --font-weight-bold:      700;
+}
+
+
+/* ============================================================================
+ * 5. Spacing & layout
+ * ----------------------------------------------------------------------------
+ *  Base unit: 4px. All spacing, padding, gaps reference these tokens. Do not
+ *  use raw px values in component code.
+ * ========================================================================== */
+:root {
+  --space-0:      0;
+  --space-0-5:    0.125rem;   /*  2px */
+  --space-1:      0.250rem;   /*  4px */
+  --space-1-5:    0.375rem;   /*  6px */
+  --space-2:      0.500rem;   /*  8px */
+  --space-3:      0.750rem;   /* 12px */
+  --space-4:      1.000rem;   /* 16px */
+  --space-5:      1.250rem;   /* 20px */
+  --space-6:      1.500rem;   /* 24px */
+  --space-8:      2.000rem;   /* 32px */
+  --space-10:     2.500rem;   /* 40px */
+  --space-12:     3.000rem;   /* 48px */
+  --space-16:     4.000rem;   /* 64px */
+  --space-20:     5.000rem;   /* 80px */
+  --space-24:     6.000rem;   /* 96px */
+
+  /* Container max-widths */
+  --container-sm:   640px;
+  --container-md:   768px;
+  --container-lg:  1024px;
+  --container-xl:  1280px;
+  --container-2xl: 1536px;
+
+  /* Default grid gutter */
+  --grid-gutter:    var(--space-6);
+
+  /* Border radius */
+  --radius-none:   0;
+  --radius-sm:     0.250rem;   /*  4px — tight UI: badges, chips */
+  --radius-md:     0.500rem;   /*  8px — inputs, default cards */
+  --radius-lg:     0.750rem;   /* 12px — modals, prominent cards */
+  --radius-xl:     1.000rem;   /* 16px — feature surfaces */
+  --radius-full:   9999px;
+
+  /* Border widths */
+  --border-width-thin:    1px;
+  --border-width-default: 1px;
+  --border-width-strong:  2px;
+}
+
+
+/* ============================================================================
+ * 6. Elevation
+ * ----------------------------------------------------------------------------
+ *  In light mode: traditional shadows with a slight warm tint to harmonize
+ *  with the brand. In dark mode: shadows are nearly invisible, so elevation
+ *  is achieved by lightening the surface (see surface-1, -2, -3 tokens) and
+ *  these shadow tokens act as faint outline glows for the highest layers.
+ * ========================================================================== */
+:root {
+  --shadow-0:  none;
+  --shadow-1:  0 1px 2px oklch(13% 0.005 285 / 0.06),
+               0 1px 3px oklch(13% 0.005 285 / 0.04);
+  --shadow-2:  0 2px 4px oklch(13% 0.005 285 / 0.06),
+               0 4px 8px oklch(13% 0.005 285 / 0.06);
+  --shadow-3:  0 4px 8px oklch(13% 0.005 285 / 0.08),
+               0 12px 24px oklch(13% 0.005 285 / 0.08);
+  --shadow-4:  0 8px 16px oklch(13% 0.005 285 / 0.10),
+               0 24px 48px oklch(13% 0.005 285 / 0.12);
+
+  --shadow-focus-ring: 0 0 0 3px oklch(70% 0.130 78 / 0.35);
+  --shadow-focus-ring-danger: 0 0 0 3px oklch(58% 0.205 25 / 0.35);
+}
+
+[data-theme="dark"] {
+  /* Dark-mode shadows are mostly cosmetic; the surface lightening
+     does the elevation work. Slight black drop preserves depth on
+     overlay layers (modals, popovers). */
+  --shadow-0:  none;
+  --shadow-1:  0 1px 2px oklch(0% 0 0 / 0.30);
+  --shadow-2:  0 2px 8px oklch(0% 0 0 / 0.40);
+  --shadow-3:  0 8px 24px oklch(0% 0 0 / 0.50);
+  --shadow-4:  0 16px 48px oklch(0% 0 0 / 0.60);
+
+  --shadow-focus-ring: 0 0 0 3px oklch(76.5% 0.130 80 / 0.45);
+  --shadow-focus-ring-danger: 0 0 0 3px oklch(75% 0.165 25 / 0.45);
+}
+
+
+/* ============================================================================
+ * 7. Motion
+ * ----------------------------------------------------------------------------
+ *  Praxova motion is purposeful and restrained. Reach for `--duration-fast`
+ *  for the vast majority of state transitions. `--duration-slow` is for
+ *  layout changes only. Springs are reserved for genuine delight moments
+ *  (job completion, milestone hit) — never for default interaction feedback.
+ * ========================================================================== */
+:root {
+  --duration-instant:  0ms;
+  --duration-fast:     150ms;
+  --duration-normal:   250ms;
+  --duration-slow:     400ms;
+
+  --ease-linear:    cubic-bezier(0, 0, 1, 1);
+  --ease-out:       cubic-bezier(0.16, 1, 0.30, 1);   /* entrances */
+  --ease-in:        cubic-bezier(0.50, 0, 0.75, 0);   /* exits */
+  --ease-in-out:    cubic-bezier(0.65, 0, 0.35, 1);   /* movement */
+  --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);/* delight only */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast:    0ms;
+    --duration-normal:  0ms;
+    --duration-slow:    0ms;
+    --ease-spring:      var(--ease-linear);
+  }
+}
+
+
+/* ============================================================================
+ * 8. Z-index scale
+ * ----------------------------------------------------------------------------
+ *  Stacking order is a system, not ad-hoc. Each layer is reserved for one
+ *  category. Components must reference these tokens, not raw numbers.
+ * ========================================================================== */
+:root {
+  --z-base:        0;
+  --z-raised:      10;     /* sticky table headers, footnotes */
+  --z-dropdown:   100;     /* select menus, autocomplete */
+  --z-sticky:     200;     /* sticky headers, sidebars */
+  --z-overlay:    400;     /* drawer scrims */
+  --z-modal:      500;     /* modal dialogs */
+  --z-popover:    600;     /* tooltips, popovers (above modals) */
+  --z-toast:      700;     /* toasts, notifications */
+  --z-debug:    9999;
+}
+
+
+/* ============================================================================
+ * 9. Iconography
+ * ----------------------------------------------------------------------------
+ *  Icons inherit currentColor by default. Stroke icons (Lucide) use a
+ *  uniform 1.5 stroke width at md+ sizes, 2 at sm and below for legibility.
+ * ========================================================================== */
+:root {
+  --icon-xs:       12px;
+  --icon-sm:       16px;
+  --icon-md:       20px;   /* default in-button */
+  --icon-lg:       24px;
+  --icon-xl:       32px;
+
+  --icon-stroke-width-default: 1.5;
+  --icon-stroke-width-bold:    2;
+}
+
+
+/* ============================================================================
+ * 10. Base global styles
+ * ----------------------------------------------------------------------------
+ *  Minimum reset to make tokens behave. Portals can layer their own resets
+ *  on top, but should not override these.
+ * ========================================================================== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-feature-settings: var(--font-features-default);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line-height);
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+}
+
+/* Tabular numerals utility — apply to any data context (tables, metrics). */
+.font-tabular {
+  font-feature-settings: var(--font-features-tabular);
+}
+
+/* Display family utility — for marketing headlines or branded moments. */
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Mono utility — code, IDs, hashes. */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Visible focus indicator. Use :focus-visible to avoid showing on click. */
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
