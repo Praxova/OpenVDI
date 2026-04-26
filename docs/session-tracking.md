@@ -284,25 +284,28 @@ Every 5 seconds:
 ```
 
 Note: `exitstatus` is returned by Proxmox but is not documented in the OpenAPI spec. See `providers/proxmox.md` → *Task Tracking* for the full quirk note.
-
 ## Template Requirements
 
 For session tracking to work, VM templates MUST have:
 
 1. **QEMU Guest Agent installed and enabled**
+
    - Linux: `apt install qemu-guest-agent && systemctl enable qemu-guest-agent`
    - Windows: Install VirtIO drivers (includes guest agent service)
 
 2. **Guest agent enabled in VM config**
+
    - `agent: 1` in Proxmox VM config
    - Verified during `POST /templates/{id}/validate`
 
 3. **VirtIO serial port configured** (required for guest agent communication)
+
    - Proxmox adds this automatically when agent=1
 
 4. **Network connectivity for noVNC** (VM must be reachable from browser for v1+ with KasmVNC)
 
 5. **VM converted to a template** (`qm template <vmid>` or `--template 1` at create time)
+
    - Non-template VMs cannot be linked-cloned from; Proxmox forces full clones
    - Template status is verified during `POST /templates/{id}/validate`
 

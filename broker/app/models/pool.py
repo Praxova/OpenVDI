@@ -43,6 +43,9 @@ class PoolStatus(str, enum.Enum):
     PROVISIONING = "provisioning"
     ERROR = "error"
     DRAINING = "draining"
+    # Set by DELETE /pools/{id}; the pool row is removed once the
+    # cascade shim finishes destroying every desktop. See m2-15.
+    DELETING = "deleting"
 
 
 def _pool_type_values(e: type[enum.Enum]) -> list[str]:

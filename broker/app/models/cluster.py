@@ -5,6 +5,7 @@ docs/database-schema.md.
 """
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,19 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.pool import Pool
     from app.models.template import Template
+
+
+class ClusterStatus(str, enum.Enum):
+    """Cluster lifecycle states. Stored as VARCHAR(32), not a Postgres
+    enum (per M2-01 decision). This Python enum is a value-set convention
+    — comparing .value against the column works because (str, Enum)
+    instances are strings.
+    """
+
+    PENDING = "pending"           # post-register or post-update, pre-first-ping
+    ACTIVE = "active"             # last ping succeeded
+    MAINTENANCE = "maintenance"   # admin-disabled; skipped by lifespan
+    OFFLINE = "offline"           # last ping failed
 
 
 class Cluster(Base):

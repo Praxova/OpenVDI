@@ -13,13 +13,11 @@ The project is a product of Praxova, hosted at horizonspecialists.com, targeting
 1. **OpenVDI is a management layer on top of a hypervisor, not a modification to it.** The hypervisor remains the source of truth for VM state. OpenVDI owns pool definitions, user entitlements, session tracking, and connection brokering. If OpenVDI goes down, VMs keep running — you just can't broker new connections.
 
 2. **Hypervisor-agnostic by construction.** The broker, provisioner, services, and workers depend only on the `HypervisorProvider` Protocol defined in `providers.md`. Concrete providers (Proxmox today; vSphere, Hyper-V, Nutanix, XCP-ng, OpenStack in the future) are loaded by provider type at runtime. Proxmox is the first provider, not the only one. See `providers.md` for the interface and `providers/proxmox.md` for the Proxmox implementation.
-
 3. **Users never touch the hypervisor API directly.** OpenVDI authenticates users against AD/LDAP and maintains a service account to each hypervisor with scoped privileges on VDI-managed VMs. This is the same model VMware Horizon uses — users auth to the Connection Server, not to vCenter.
 
 4. **Provider-native tagging provides recovery and visibility.** VDI-managed VMs are tagged with metadata (e.g. `openvdi-managed`, `openvdi-pool-engineering`, `openvdi-type-nonpersistent`, `openvdi-user-jsmith`). Providers that support tags expose them through `VMStatus.tags`; this gives visibility in the native hypervisor UI and provides a recovery path if the OpenVDI database is lost. Tag tokens on Proxmox are restricted to `[a-z0-9_-]` — colons and equals signs are rejected — so tag values that embed a pool name or username go through a slug transform (lowercase; non-`[a-z0-9_-]` replaced with `-`; runs collapsed; leading/trailing `-` stripped). The authoritative metadata store is the OpenVDI database; the VM description field carries a human-readable `key=value` summary for DR when a username slugifies lossily. See `database-schema.md` → *VM Tagging Convention*.
 
 5. **Protocol-agnostic connection brokering.** The broker returns a typed `ConsoleTicket` — it doesn't care whether the client connects via noVNC, SPICE, KasmVNC, WebMKS, or RDP. The portal knows how to render each kind. v0 supports noVNC only; the data shape is ready for more.
-
 ## Cloning Model
 
 OpenVDI uses a consistent cloning model across all pool types. This is a deliberate architectural decision — do not deviate without updating this document first.
@@ -43,6 +41,7 @@ Persistent and non-persistent pools use the same clone mechanism. The difference
 
 ```
 ┌─────────────────────────────────────────────────────┐
+```
 │  Web Portal (React)                                 │
 │  - User desktop launcher                            │
 │  - Console renderer (noVNC in v0; extensible)       │

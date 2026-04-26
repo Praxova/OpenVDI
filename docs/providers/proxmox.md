@@ -173,10 +173,10 @@ Returns a `TaskHandle` wrapping the UPID.
 **`destroy_vm(ref, purge=True) -> TaskHandle`** — `DELETE /nodes/{node}/qemu/{vmid}`. VM must be stopped first. `purge=True` also removes from replication/backup jobs.
 
 **Internal retry policy**: destroy can fail with HTTP 500 and a message mentioning lock contention (e.g. `trying to acquire lock '...' failed`) when the VM's storage is mid-operation. The provider retries up to 3 times with exponential backoff starting at 5 seconds. If retries are exhausted, raises `ProviderLockError`. 4xx errors are NOT retried.
-
-**`get_vm_status(ref) -> VMStatus`** — `GET /nodes/{node}/qemu/{vmid}/status/current`.
+`get_vm_status(ref) -> VMStatus` — `GET /nodes/{node}/qemu/{vmid}/status/current`.
 
 Field mapping from Proxmox response:
+
 - Proxmox `status` → `VMStatus.power_state` (values match: `running`/`stopped`/`paused`)
 - Proxmox `name` → `VMStatus.name`
 - Proxmox `cpus` → `VMStatus.cpu_cores`
@@ -208,12 +208,7 @@ Field mapping from Proxmox response:
 
 > **Implementation status.** The Protocol methods `create_snapshot`, `rollback_snapshot`, `list_snapshots`, `delete_snapshot`, and `configure_vm` are introduced on the `ProxmoxProvider` in Milestone 2. No signature changes from the Protocol definition in `providers.md` — this is an implementation delta. They are exercised by the M2 provisioner when taking the `openvdi-base` snapshot at provisioning time, and by pool-level VM overrides (`cpu_cores`, `memory_mb`) applied via `configure_vm` between clone completion and first start.
 
-| Interface method | Proxmox API |
-|------------------|-------------|
-| `create_snapshot(ref, name, description, include_ram)` | `POST /nodes/{node}/qemu/{vmid}/snapshot` with `snapname=name`, `vmstate=include_ram` |
-| `rollback_snapshot(ref, name)` | `POST /nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback` |
-| `list_snapshots(ref)` | `GET /nodes/{node}/qemu/{vmid}/snapshot` (including synthetic `current` entry) |
-| `delete_snapshot(ref, name)` | `DELETE /nodes/{node}/qemu/{vmid}/snapshot/{snapname}` |
+Interface methodProxmox API`create_snapshot(ref, name, description, include_ram)POST /nodes/{node}/qemu/{vmid}/snapshot` with `snapname=name`, `vmstate=include_ramrollback_snapshot(ref, name)POST /nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollbacklist_snapshots(ref)GET /nodes/{node}/qemu/{vmid}/snapshot` (including synthetic `current` entry)`delete_snapshot(ref, name)DELETE /nodes/{node}/qemu/{vmid}/snapshot/{snapname}`
 
 `SnapshotInfo.created_at` is Proxmox's `snaptime` (unix epoch) when present; `None` for the synthetic `current` entry.
 
@@ -228,10 +223,14 @@ Field mapping from Proxmox response:
 #   pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/get-osinfo", "GET")
 #   pve_get_endpoint_detail(
 #       "/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces", "GET")
-#   pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec", "POST")
-#   pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec-status", "GET")
 ```
 
+# pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec", "POST")
+
+# pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec-status", "GET")
+
+```
+```
 **`agent_ping(ref) -> bool`** — `POST /nodes/{node}/qemu/{vmid}/agent/ping`. Proxmox returns HTTP 500 when the guest agent is unreachable; the provider catches this specific shape and returns `False`. Other errors (404, 500 from actual server problems) raise normally.
 
 **`agent_get_users(ref) -> list[GuestUser]`** — `GET /nodes/{node}/qemu/{vmid}/agent/get-users`.

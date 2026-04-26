@@ -12,9 +12,14 @@ PrincipalType = Literal["user", "group"]
 
 
 class EntitlementCreate(BaseModel):
+    """POST body for /pools/{pool_id}/entitlements.
+
+    `pool_id` is the path parameter, so it deliberately is NOT part of
+    the request body — removing duplication between URL and body.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    pool_id: uuid.UUID
     principal_type: PrincipalType
     principal_name: str
 

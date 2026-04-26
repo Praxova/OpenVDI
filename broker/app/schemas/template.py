@@ -61,3 +61,19 @@ class TemplateRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class ValidationCheck(BaseModel):
+    """Single boolean check surfaced by POST /templates/{id}/validate."""
+
+    name: str
+    passed: bool
+    message: str
+
+
+class TemplateValidationResult(BaseModel):
+    """Aggregate result of a template validation run."""
+
+    template_id: uuid.UUID
+    passed: bool
+    checks: list[ValidationCheck]

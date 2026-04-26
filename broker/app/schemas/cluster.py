@@ -59,3 +59,33 @@ class ClusterRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class NodeInfoRead(BaseModel):
+    """Mirror of providers.base.NodeInfo for the wire.
+
+    Pydantic can't consume frozen dataclasses via `from_attributes` when
+    the dataclass holds non-standard types (frozenset) so the schema is
+    hand-written. Fields here must match NodeInfo 1:1.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    node: str
+    display_name: str
+    status: Literal["online", "offline", "maintenance"]
+    cpu_cores: int
+    memory_bytes: int
+
+
+class ClusterReadWithNodes(ClusterRead):
+    """Cluster row + live node snapshot from the provider.
+
+    `nodes` may be empty if the cluster has no active provider entry in
+    `app.state.providers` (e.g. offline at startup, in maintenance) or
+    if `list_nodes` raised. Either way the cluster row itself is still
+    returned — admins shouldn't be locked out of reading the row just
+    because the hypervisor is unreachable.
+    """
+
+    nodes: list[NodeInfoRead] = []
