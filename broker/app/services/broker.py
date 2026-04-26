@@ -53,6 +53,7 @@ from app.providers.base import (
     HypervisorProvider,
     VMRef,
 )
+from app.services.audit_service import log_business_event
 from app.services.provisioner import provision_desktop
 from app.services.session_tracker import (
     transition_to_active,
@@ -288,6 +289,27 @@ async def connect(
         },
     )
     desktop.status = DesktopStatus.CONNECTED
+
+    # Step 7b: audit the business event inside the same transaction.
+    # If anything after this raises before commit, both the state
+    # change and the audit row roll back together — which is correct,
+    # because no connect actually happened. The HTTP middleware does
+    # NOT audit /me/* (W-4), so this is the only record of the event.
+    await log_business_event(
+        session=session,
+        actor=username,
+        action="broker.connect",
+        resource_type="session",
+        resource_id=session_row.id,
+        details={
+            "pool_id": str(pool.id),
+            "pool_name": pool.name,
+            "desktop_id": str(desktop.id),
+            "desktop_name": desktop.name,
+            "assignment_type": desktop.assignment_type,
+        },
+    )
+
     await session.commit()
 
     logger.info(
@@ -334,6 +356,22 @@ async def end_session(
     # Fetch the desktop for logging. transition_to_ended loaded it into
     # the session's identity map, so session.get() is a cache hit.
     desktop = await session.get(Desktop, session_row.desktop_id)
+
+    # Audit inside the same transaction as the state change — see the
+    # `broker.connect` note above for the same rationale.
+    await log_business_event(
+        session=session,
+        actor=actor_username or session_row.username,
+        action="broker.session.end",
+        resource_type="session",
+        resource_id=session_row.id,
+        details={
+            "desktop_id": str(desktop.id) if desktop else None,
+            "desktop_name": desktop.name if desktop else None,
+            "assignment_type": desktop.assignment_type if desktop else None,
+        },
+    )
+
     await session.commit()
     logger.info(
         "broker: session_id=%s ended (actor=%s) desktop=%s -> %s",
