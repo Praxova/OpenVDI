@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    OpenVDI Win11 Template — Sysprep Answer File (CLONE PHASE)
+    ===========================================================
+    This file controls OOBE on every clone of the template. It is staged at
+    C:\Windows\System32\Sysprep\unattend.xml during the Packer build, and
+    consumed automatically when sysprep generalizes the template.
+
+    THE TIMING CONSTRAINT (read this twice)
+    ----------------------------------------
+    The OpenVDI broker's M2-19 path is:
+        Clone -> boot -> wait up to 90s for qemu-guest-agent ping
+              -> 60s quiesce -> snapshot 'openvdi-base'
+              -> reboot -> wait for agent -> hand out console ticket
+
+    The qemu-guest-agent service starts during early Windows boot, BEFORE
+    OOBE finishes. So agent_ping typically succeeds at ~30-60s. The 60s
+    quiesce ends at ~90-120s. If OOBE is not complete by then, the snapshot
+    captures a half-booted state and ALL clones break in the same way.
+
+    EVERY OOBE flag below exists to make OOBE complete as fast as possible.
+    Do not "soften" any of these — adding a single human-interaction screen
+    can push timing past the quiesce window.
+
+    What's different from autounattend.xml:
+      - ComputerName is "*" (random) — sysprep generates one
+      - No static IP — clones use DHCP
+      - No auto-logon — each clone presents the login screen, user logs in
+      - Build-only firewall/WinRM tweaks not repeated
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+    <!-- ===================================================================
+         Pass 4: specialize — runs on every clone before OOBE
+         =================================================================== -->
+    <settings pass="specialize">
+
+        <component name="Microsoft-Windows-Shell-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <!-- Random computer name. sysprep replaces "*" with a generated
+                 hostname. The OpenVDI broker can override this later if it
+                 wants stable hostnames per assignment. -->
+            <ComputerName>*</ComputerName>
+            <TimeZone>UTC</TimeZone>
+            <RegisteredOrganization>OpenVDI</RegisteredOrganization>
+            <RegisteredOwner>OpenVDI User</RegisteredOwner>
+        </component>
+
+        <!-- BypassNRO again — this is per-clone, not just per-template. -->
+        <component name="Microsoft-Windows-Deployment"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>cmd /c reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
+                    <Description>Bypass MS account requirement</Description>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+        </component>
+    </settings>
+
+    <!-- ===================================================================
+         Pass 7: oobeSystem — first boot of every clone
+         THIS IS THE TIMING-CRITICAL PASS
+         =================================================================== -->
+    <settings pass="oobeSystem">
+
+        <component name="Microsoft-Windows-International-Core"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <InputLocale>en-US</InputLocale>
+            <SystemLocale>en-US</SystemLocale>
+            <UILanguage>en-US</UILanguage>
+            <UILanguageFallback>en-US</UILanguageFallback>
+            <UserLocale>en-US</UserLocale>
+        </component>
+
+        <component name="Microsoft-Windows-Shell-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+            <!-- Aggressive OOBE skip. Every flag here exists for a reason;
+                 do not remove any without understanding what it skips. -->
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <HideLocalAccountScreen>true</HideLocalAccountScreen>
+                <NetworkLocation>Work</NetworkLocation>
+                <ProtectYourPC>3</ProtectYourPC>
+                <SkipMachineOOBE>true</SkipMachineOOBE>
+                <SkipUserOOBE>true</SkipUserOOBE>
+            </OOBE>
+
+            <!-- Local Administrator with a known default password.
+                 This is what the login screen will offer. The OpenVDI broker
+                 (in M3+ work) will likely either:
+                   (a) join clones to AD via post-clone PowerShell, or
+                   (b) re-set the Administrator password per-assignment, or
+                   (c) create per-user accounts dynamically.
+                 For M2-19 the test does not log in, so this account just
+                 exists to make Windows happy with at least one local user.
+
+                 IMPORTANT: change this password before going to production.
+                 It is hardcoded into the template image — anyone with a
+                 console ticket could use it. -->
+            <UserAccounts>
+                <AdministratorPassword>
+                    <Value>OpenVDI@Default1</Value>
+                    <PlainText>true</PlainText>
+                </AdministratorPassword>
+            </UserAccounts>
+
+            <!-- No AutoLogon. We want the login screen to appear for users
+                 connecting via noVNC. -->
+
+            <!-- Minimal FirstLogonCommands. We deliberately do NOT do any
+                 heavy lifting here (no software installs, no Windows Update,
+                 no domain join) because every command extends OOBE and
+                 risks pushing past the broker's quiesce window. -->
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Description>Mark clone as ready</Description>
+                    <CommandLine>cmd.exe /c echo OpenVDI clone OOBE complete %DATE% %TIME% &gt; C:\Windows\Temp\openvdi-ready.txt</CommandLine>
+                </SynchronousCommand>
+            </FirstLogonCommands>
+        </component>
+    </settings>
+</unattend>

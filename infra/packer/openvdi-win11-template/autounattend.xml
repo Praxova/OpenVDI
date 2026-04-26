@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    OpenVDI Win11 Template — Autounattend Answer File (BUILD PHASE)
+    ================================================================
+    Used by Packer during initial Windows install. Sets up:
+      - Windows 11 Pro install with TPM/SecureBoot/RAM bypass
+      - MBR partition layout (matches SeaBIOS in the Packer template)
+      - Static IP 10.0.0.250 so Packer can connect via WinRM
+      - Local Administrator account with build password
+      - WinRM enabled and firewall disabled
+      - Auto-logon as Administrator (so FirstLogonCommands run)
+
+    This file is bundled into an ISO with OEMDRV label by build-answer-iso.sh.
+    Do NOT confuse with sysprep-unattend.xml — that one runs on CLONES.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+    <!-- ===================================================================
+         Pass 1: windowsPE — runs in WinPE before Windows is installed
+         =================================================================== -->
+    <settings pass="windowsPE">
+
+        <component name="Microsoft-Windows-International-Core-WinPE"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <SetupUILanguage>
+                <UILanguage>en-US</UILanguage>
+            </SetupUILanguage>
+            <InputLocale>en-US</InputLocale>
+            <SystemLocale>en-US</SystemLocale>
+            <UILanguage>en-US</UILanguage>
+            <UILanguageFallback>en-US</UILanguageFallback>
+            <UserLocale>en-US</UserLocale>
+        </component>
+
+        <component name="Microsoft-Windows-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+            <!-- TPM/SecureBoot/RAM/CPU bypass.
+                 Win11 Setup checks these requirements in WinPE before showing
+                 the install UI. Setting these registry keys before the check
+                 happens makes Setup proceed without complaint. We ARE running
+                 on a vTPM-less SeaBIOS VM, so all three bypasses are needed. -->
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Bypass TPM 2.0 requirement</Description>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <Path>cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Bypass Secure Boot requirement</Description>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <Path>cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Bypass RAM requirement</Description>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>4</Order>
+                    <Path>cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Bypass CPU requirement</Description>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>5</Order>
+                    <Path>cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassStorageCheck /t REG_DWORD /d 1 /f</Path>
+                    <Description>Bypass storage requirement</Description>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+
+            <!-- MBR partition layout to match SeaBIOS boot:
+                   Partition 1: 500MB System Reserved (boot files)
+                   Partition 2: rest of disk for Windows -->
+            <DiskConfiguration>
+                <Disk wcm:action="add">
+                    <DiskID>0</DiskID>
+                    <WillWipeDisk>true</WillWipeDisk>
+                    <CreatePartitions>
+                        <CreatePartition wcm:action="add">
+                            <Order>1</Order>
+                            <Type>Primary</Type>
+                            <Size>500</Size>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Order>2</Order>
+                            <Type>Primary</Type>
+                            <Extend>true</Extend>
+                        </CreatePartition>
+                    </CreatePartitions>
+                    <ModifyPartitions>
+                        <ModifyPartition wcm:action="add">
+                            <Order>1</Order>
+                            <PartitionID>1</PartitionID>
+                            <Format>NTFS</Format>
+                            <Label>System Reserved</Label>
+                            <Active>true</Active>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>2</Order>
+                            <PartitionID>2</PartitionID>
+                            <Format>NTFS</Format>
+                            <Label>Windows</Label>
+                            <Letter>C</Letter>
+                        </ModifyPartition>
+                    </ModifyPartitions>
+                </Disk>
+            </DiskConfiguration>
+
+            <!-- Image selection. ImageInstall by name is more robust than by
+                 index, because Microsoft sometimes reorders SKUs in ISO
+                 updates. "Windows 11 Pro" is consistent across builds. -->
+            <ImageInstall>
+                <OSImage>
+                    <InstallTo>
+                        <DiskID>0</DiskID>
+                        <PartitionID>2</PartitionID>
+                    </InstallTo>
+                    <InstallFrom>
+                        <MetaData wcm:action="add">
+                            <Key>/IMAGE/NAME</Key>
+                            <Value>Windows 11 Pro</Value>
+                        </MetaData>
+                    </InstallFrom>
+                </OSImage>
+            </ImageInstall>
+
+            <UserData>
+                <!-- Generic Win11 Pro key — used by Setup to determine SKU,
+                     not for activation. Activation happens later (or never,
+                     since this is a lab template). -->
+                <ProductKey>
+                    <Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>
+                    <WillShowUI>OnError</WillShowUI>
+                </ProductKey>
+                <AcceptEula>true</AcceptEula>
+                <FullName>OpenVDI</FullName>
+                <Organization>OpenVDI Lab</Organization>
+            </UserData>
+        </component>
+    </settings>
+
+    <!-- ===================================================================
+         Pass 4: specialize — runs after image is laid down, before OOBE
+         =================================================================== -->
+    <settings pass="specialize">
+
+        <component name="Microsoft-Windows-Shell-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <ComputerName>WIN11-BUILD</ComputerName>
+            <TimeZone>UTC</TimeZone>
+            <RegisteredOrganization>OpenVDI Lab</RegisteredOrganization>
+            <RegisteredOwner>OpenVDI</RegisteredOwner>
+        </component>
+
+        <!-- BypassNRO key: skips the "you must use a Microsoft account" wall.
+             Combined with HideOnlineAccountScreens in OOBE, this allows
+             local-account-only setup. Required for Win11 22H2+ unattended. -->
+        <component name="Microsoft-Windows-Deployment"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>cmd /c reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
+                    <Description>Bypass MS account requirement (Win11 22H2+)</Description>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+        </component>
+    </settings>
+
+    <!-- ===================================================================
+         Pass 7: oobeSystem — runs at first boot, configures user/network
+         =================================================================== -->
+    <settings pass="oobeSystem">
+
+        <component name="Microsoft-Windows-International-Core"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <InputLocale>en-US</InputLocale>
+            <SystemLocale>en-US</SystemLocale>
+            <UILanguage>en-US</UILanguage>
+            <UILanguageFallback>en-US</UILanguageFallback>
+            <UserLocale>en-US</UserLocale>
+        </component>
+
+        <component name="Microsoft-Windows-Shell-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS"
+                   xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+            <!-- OOBE skip flags. Maximally aggressive — everything that can
+                 be skipped, IS skipped. The build doesn't need a human to
+                 click anything. -->
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <NetworkLocation>Work</NetworkLocation>
+                <ProtectYourPC>3</ProtectYourPC>
+                <SkipMachineOOBE>true</SkipMachineOOBE>
+                <SkipUserOOBE>true</SkipUserOOBE>
+            </OOBE>
+
+            <!-- Local Administrator account.
+                 The built-in Administrator is enabled and given the build
+                 password. We also add it explicitly to LocalAccounts because
+                 some Win11 versions don't enable the built-in account from
+                 AdministratorPassword alone. -->
+            <UserAccounts>
+                <AdministratorPassword>
+                    <Value>P@cker-Bu1ld!</Value>
+                    <PlainText>true</PlainText>
+                </AdministratorPassword>
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Password>
+                            <Value>P@cker-Bu1ld!</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                        <DisplayName>Administrator</DisplayName>
+                        <Group>Administrators</Group>
+                        <Name>Administrator</Name>
+                    </LocalAccount>
+                </LocalAccounts>
+            </UserAccounts>
+
+            <!-- Auto-logon so FirstLogonCommands actually run.
+                 LogonCount=999 is way more than we need — sysprep generalize
+                 wipes this, so it never affects the final template. -->
+            <AutoLogon>
+                <Password>
+                    <Value>P@cker-Bu1ld!</Value>
+                    <PlainText>true</PlainText>
+                </Password>
+                <Enabled>true</Enabled>
+                <Username>Administrator</Username>
+                <LogonCount>999</LogonCount>
+            </AutoLogon>
+
+            <!-- FirstLogonCommands: runs in this order, synchronously, after
+                 first auto-logon. This is where Packer's ability to connect
+                 hinges. Critical sequence:
+                   1. Disable IPv6 binding loops (Win11 quirk)
+                   2. Set static IP to 10.0.0.250 so Packer knows where to find us
+                   3. Enable PSRemoting / WinRM with basic auth + unencrypted
+                   4. Open WinRM through firewall (or just disable firewall) -->
+	<FirstLogonCommands>
+    		<SynchronousCommand wcm:action="add">
+    		    <Order>1</Order>
+    		    <Description>Set static IP for Packer WinRM</Description>
+    		    <CommandLine>powershell.exe -NoProfile -Command "Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | ForEach-Object { New-NetIPAddress -InterfaceIndex $_.ifIndex -IPAddress 10.0.0.250 -PrefixLength 24 -DefaultGateway 10.0.0.1 -ErrorAction SilentlyContinue; Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses '10.0.0.1' }"</CommandLine>
+    		</SynchronousCommand>
+    		<SynchronousCommand wcm:action="add">
+   		     <Order>2</Order>
+   		     <Description>Wait for network classification, then force Private profile</Description>
+   		     <CommandLine>powershell.exe -NoProfile -Command "Start-Sleep -Seconds 10; Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
+   		 </SynchronousCommand>
+   		 <SynchronousCommand wcm:action="add">
+   		     <Order>3</Order>
+   		     <Description>Disable Windows Firewall (build only)</Description>
+   		     <CommandLine>netsh advfirewall set allprofiles state off</CommandLine>
+   		 </SynchronousCommand>
+   		 <SynchronousCommand wcm:action="add">
+   			<Order>4</Order>
+        		<Description>Enable PSRemoting / WinRM</Description>
+        		<CommandLine>powershell.exe -NoProfile -Command "Enable-PSRemoting -SkipNetworkProfileCheck -Force"</CommandLine>
+    		</SynchronousCommand>
+    		<SynchronousCommand wcm:action="add">
+        		<Order>5</Order>
+        		<Description>Allow unencrypted WinRM (build only)</Description>
+        		<CommandLine>cmd.exe /c winrm set winrm/config/service @{AllowUnencrypted="true"}</CommandLine>
+    		</SynchronousCommand>
+    		<SynchronousCommand wcm:action="add">
+        		<Order>6</Order>
+        		<Description>Allow Basic auth on WinRM</Description>
+        		<CommandLine>cmd.exe /c winrm set winrm/config/service/auth @{Basic="true"}</CommandLine>
+    		</SynchronousCommand>
+    		<SynchronousCommand wcm:action="add">
+        		<Order>7</Order>
+        		<Description>Marker file</Description>
+        		<CommandLine>cmd.exe /c echo Build ready &gt; C:\Windows\Temp\packer-ready.txt</CommandLine>
+    		</SynchronousCommand>
+	</FirstLogonCommands>
+        </component>
+    </settings>
+</unattend>

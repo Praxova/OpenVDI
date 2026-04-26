@@ -1,0 +1,15 @@
+# Secrets — never commit
+credentials.auto.pkrvars.hcl
+*.pkrvars.hcl
+!*.pkrvars.hcl.example
+
+# Build artifacts
+*.iso
+packer-build.log
+packer_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
