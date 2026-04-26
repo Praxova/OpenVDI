@@ -130,6 +130,7 @@ async def provision_desktop(
     pool: Pool,
     template: Template,
     assigned_user: str | None = None,
+    existing_desktop: Desktop | None = None,
 ) -> Desktop:
     """Provision one desktop for the given pool.
 
@@ -137,6 +138,15 @@ async def provision_desktop(
     `assigned_user` is set on the Desktop row when the broker has
     pre-assigned (persistent-pool new-user case); for warm-spare
     provisioning the argument stays None.
+
+    `existing_desktop` is the rebuild path (M2-13): when the caller has
+    an existing Desktop row whose VM was just destroyed and wants to
+    reprovision into the same VMID / node / name, they pass the row
+    here. Step 1 skips VMID allocation and row creation; the row's
+    provisioning-state fields (status, error_message, power_state,
+    provisioned_at, pve_task_upid, pve_task_kind) are reset, and
+    assigned_user / assignment_type are set from the passed argument
+    and pool type — same rules as the new-row path.
 
     Returns:
         Desktop in `available` / `assigned` (success) or `error` state.
@@ -154,31 +164,55 @@ async def provision_desktop(
 
     is_persistent_pool = pool.pool_type == PoolType.PERSISTENT
 
-    # Step 1: allocate VMID + reserve Desktop row (flush, do not commit)
-    vmid = await allocate_vmid(session, pool)
-    name = f"{pool.name_prefix}-{vmid - pool.vmid_range_start + 1:03d}"
-    target_node = (
-        pool.target_nodes.split(",")[0].strip()
-        if pool.target_nodes
-        else template.pve_node
-    )
-    desktop = Desktop(
-        pool_id=pool.id,
-        pve_vmid=vmid,
-        pve_node=target_node,
-        name=name,
-        status=DesktopStatus.PROVISIONING,
-        assigned_user=assigned_user,
-        assignment_type=(
+    # Step 1: allocate VMID + reserve Desktop row (flush, do not commit).
+    # The rebuild path passes existing_desktop to skip allocation and
+    # reuse the prior VMID; both branches end with `desktop`, `vmid`,
+    # `name`, `target_node` set for Step 2 onward.
+    if existing_desktop is None:
+        vmid = await allocate_vmid(session, pool)
+        name = f"{pool.name_prefix}-{vmid - pool.vmid_range_start + 1:03d}"
+        target_node = (
+            pool.target_nodes.split(",")[0].strip()
+            if pool.target_nodes
+            else template.pve_node
+        )
+        desktop = Desktop(
+            pool_id=pool.id,
+            pve_vmid=vmid,
+            pve_node=target_node,
+            name=name,
+            status=DesktopStatus.PROVISIONING,
+            assigned_user=assigned_user,
+            assignment_type=(
+                "persistent" if (assigned_user and is_persistent_pool) else None
+            ),
+        )
+        session.add(desktop)
+        await session.flush()
+        logger.info(
+            "provisioner: reserved vmid=%d name=%s pool=%s",
+            vmid, name, pool.name,
+        )
+    else:
+        desktop = existing_desktop
+        vmid = desktop.pve_vmid
+        name = desktop.name
+        target_node = desktop.pve_node
+        desktop.status = DesktopStatus.PROVISIONING
+        desktop.error_message = None
+        desktop.power_state = "stopped"
+        desktop.provisioned_at = None
+        desktop.pve_task_upid = None
+        desktop.pve_task_kind = None
+        desktop.assigned_user = assigned_user
+        desktop.assignment_type = (
             "persistent" if (assigned_user and is_persistent_pool) else None
-        ),
-    )
-    session.add(desktop)
-    await session.flush()
-    logger.info(
-        "provisioner: reserved vmid=%d name=%s pool=%s",
-        vmid, name, pool.name,
-    )
+        )
+        await session.flush()
+        logger.info(
+            "provisioner: reusing vmid=%d name=%s pool=%s (rebuild path)",
+            vmid, name, pool.name,
+        )
 
     try:
         # Step 2: clone — persist UPID + commit before the long wait so

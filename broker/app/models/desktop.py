@@ -90,6 +90,10 @@ class Desktop(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
     pve_task_upid: Mapped[str | None] = mapped_column(String(512))
+    # Kind of the in-flight task (matches DesktopTaskKind values). NULL
+    # when no task is in flight. Persisted so startup-resume knows which
+    # completion handler to invoke — see app.services.task_tracker.
+    pve_task_kind: Mapped[str | None] = mapped_column(String(32))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),
