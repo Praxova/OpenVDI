@@ -21,7 +21,7 @@
     "paths": {
       "@/*": ["src/*"]
     },
-    "types": ["node"]
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src", "vite.config.ts"]
 }
