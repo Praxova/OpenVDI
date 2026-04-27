@@ -23,6 +23,14 @@
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
 
+  // Tailwind's default `dark:` variant gates on `prefers-color-scheme`.
+  // The design system gates on `<html data-theme="dark">` so the user's
+  // manual toggle propagates through `dark:` utilities. Most components
+  // don't need `dark:` variants — they reference the role token and
+  // inherit the swap automatically; `dark:` is reserved for cases where
+  // the *element* itself differs between modes (e.g. brand mark file).
+  darkMode: ["selector", '[data-theme="dark"]'],
+
   theme: {
     // Wipe Tailwind's color palette. Only design-system roles compile.
     colors: {

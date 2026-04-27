@@ -1,31 +1,77 @@
-// M3-01 placeholder. M3-03 replaces this with the AppShell + real routing.
-//
-// The composition deliberately exercises the full token-bridge chain:
-// surface tokens (bg-bg, bg-surface-1), border (border-border-subtle),
-// radius (rounded-lg), shadow (shadow-md), spacing (p-6, mt-2, mt-4),
-// text colors (primary/secondary/tertiary), display vs body fonts,
-// and the type scale (text-h1, text-body, text-caption). If any of
-// these don't resolve, the placeholder breaks visibly — by design.
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+
+import { AppShell } from "@/components/AppShell";
+import { LoginPage } from "@/pages/LoginPage";
+import { ProtectedRoute } from "@/auth/ProtectedRoute";
+
+/**
+ * Route layout:
+ *
+ *   /login                    — public, dev-auth form
+ *   /                         — protected, redirects to /desktops
+ *   /desktops                 — protected, M3-04 launcher (placeholder until then)
+ *   /desktops/:poolId/console — protected, M3-06 console (NOT registered here)
+ *   /sessions                 — protected, M3-07 sessions (placeholder until then)
+ *   *                         — protected, redirects to /desktops
+ *
+ * The protected branch is wrapped in <ProtectedRoute> + <AppShell>.
+ * Pages render inside AppShell's <Outlet />.
+ */
 export default function App() {
   return (
-    <main className="min-h-screen bg-bg flex items-center justify-center p-6">
-      <section
-        aria-labelledby="placeholder-title"
-        className="bg-surface-1 border border-border-subtle rounded-lg shadow-md p-6 max-w-md"
-      >
-        <h1
-          id="placeholder-title"
-          className="font-display text-h1 font-semibold text-text-primary"
-        >
-          OpenVDI Portal
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppShell />}>
+            <Route path="/" element={<Navigate to="/desktops" replace />} />
+            <Route
+              path="/desktops"
+              element={
+                <PlaceholderPage
+                  title="Desktops"
+                  hint="The launcher arrives in M3-04."
+                />
+              }
+            />
+            <Route
+              path="/sessions"
+              element={
+                <PlaceholderPage
+                  title="Sessions"
+                  hint="The sessions view arrives in M3-07."
+                />
+              }
+            />
+            <Route path="*" element={<Navigate to="/desktops" replace />} />
+          </Route>
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+interface PlaceholderPageProps {
+  title: string;
+  hint: string;
+}
+
+/**
+ * Inline placeholder used for /desktops and /sessions until M3-04 and
+ * M3-07 land. Once those prompts replace the routes with real pages,
+ * this component is unused and should be deleted as part of the
+ * cleanup in whichever prompt removes the last reference.
+ */
+function PlaceholderPage({ title, hint }: PlaceholderPageProps) {
+  return (
+    <div className="p-6">
+      <section className="max-w-2xl bg-surface-1 border border-border-subtle rounded-lg p-6">
+        <h1 className="font-display text-h2 font-semibold text-text-primary">
+          {title}
         </h1>
-        <p className="text-body text-text-secondary mt-2">
-          Scaffold up. Design system wired. Next stop: API client and dev-auth login.
-        </p>
-        <p className="text-caption text-text-tertiary mt-4">
-          M3-01 complete · Praxova design system v0.1
-        </p>
+        <p className="text-body text-text-secondary mt-2">{hint}</p>
       </section>
-    </main>
+    </div>
   );
 }

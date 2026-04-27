@@ -14,9 +14,12 @@ export default defineConfig({
     },
   },
   test: {
-    // No DOM needed for the M3-02 spec; M3-05 will switch this to
-    // happy-dom (or override per-spec) for component tests.
-    environment: "node",
+    // happy-dom (since M3-03): the AuthContext hook test exercises
+    // localStorage + React render, the theme module asserts on
+    // document.documentElement, and M3-05's component tests will need
+    // a DOM too. The M3-02 client tests continue to pass under
+    // happy-dom — Response and fetch are present in both environments.
+    environment: "happy-dom",
     // describe/it/expect available without imports.
     globals: true,
     include: ["src/**/*.{test,test-d}.{ts,tsx}"],
