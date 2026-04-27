@@ -333,16 +333,45 @@ This milestone is being restarted. The prior attempt (Sonnet 4.6) was built agai
 
 ### Milestone 3 — "I can connect from a browser" (Weekend 3)
 
-**Goal:** First end-to-end demo: browser → FastAPI → provider → VM console.
+**Goal:** First end-to-end demo — browser → FastAPI → provider → VM console. The user logs in, picks an entitled pool, clicks Connect, and operates a real Windows or Linux desktop in their browser.
 
 **Deliverables:**
-- `portal/` — Basic React app with Vite
-- `portal/src/components/NoVNCViewer.tsx` — Embedded noVNC component, accepting a `NoVNCTicket` shape
-- `portal/src/components/DesktopLauncher.tsx` — Desktop list + connect button
-- `portal/src/api/` — API client using @tanstack/react-query
-- Proxy config (Vite dev proxy to FastAPI)
 
-**Validation:** Open browser → see available desktop → click connect → noVNC console appears in browser showing the VM desktop.
+- `portal/` — Vite + React + TypeScript scaffold (M3-01) with a Tailwind theme bridge that maps every Praxova design-system role token to a Tailwind utility class. Vanilla Tailwind defaults (`bg-amber-500`, etc.) do not compile, by design.
+- `portal/src/api/client.ts` + `portal/src/api/errors.ts` — `BrokerClient` class wrapping fetch (M3-02) with typed envelope handling, `BrokerError` class, transport-layer error normalization, M3-04's TanStack Query `defaultError` register declaration, and M3-07's `brokerErrorCode` helper.
+- `portal/src/auth/AuthContext.tsx` + `portal/src/auth/ProtectedRoute.tsx` + `portal/src/lib/theme.ts` (M3-03) — header-based dev auth (X-Dev-User / X-Dev-Groups / X-Dev-Role) with a JWT-ready seam for M4. Theme module reads prefers-color-scheme, persists override to localStorage, applies via `[data-theme]` attribute. AppShell header per design-system §8.10.1 with brand mark, nav, username, theme toggle, logout.
+- `portal/src/pages/LoginPage.tsx` (M3-03) — username, groups (CSV), role pill-radio. Submission writes to AuthContext + localStorage and bounces to /desktops.
+- `portal/src/pages/DesktopsPage.tsx` + `portal/src/components/PoolCard.tsx` + `portal/src/components/StatusBadge.tsx` (M3-04) — TanStack Query bound to `GET /me/desktops`. Pool cards render `display_name` (NEVER `name` slug), description, type pill, assignment summary if present, Connect/Resume button. Loading skeleton, error state with Retry, empty state.
+- `portal/src/components/NoVNCViewer.tsx` + `portal/src/types/novnc.d.ts` (M3-05) — pure presentational viewer wrapping `@novnc/novnc@^1.4`. StrictMode-safe RFB lifecycle, canvas-stacking-defense via `replaceChildren`, callback ref-mirror to avoid effect-deps churn. `forwardRef` exposes `sendCtrlAltDel`. Vitest-tested with mocked RFB extending real EventTarget.
+- `portal/src/pages/ConsolePage.tsx` + `portal/src/components/ConsoleToolbar.tsx` + `portal/src/api/connect.ts` + `portal/src/api/sessions.ts` (M3-06) — connect mutation, disconnect mutation, three cleanup paths (explicit Disconnect button, SPA-nav cleanup, tab-close beforeunload — all fenced by a single `disconnectFiredRef`). Connection state machine: connecting → connected → disconnecting → disconnected | error. Auto-navigate on user-initiated disconnect; stay-on-page for unexpected events.
+- `portal/src/pages/SessionsPage.tsx` + `portal/src/components/SessionRow.tsx` + `portal/src/lib/time.ts` (M3-07) — sessions table with two-state filter (Active | All), per-row Disconnect for active sessions, orphan handling for sessions whose backing desktop has been deleted. `formatRelativeTime` lifted from M3-04 PoolCard.
+- `portal/playwright.config.ts` + `portal/e2e/*` (M3-08) — Playwright smoke suite covering launcher, connect flow, and theme toggle. Asserts canvas exists with non-zero dimensions and the connection-state indicator transitions through "Connecting" → "Connected" — a transitive proof that RFB's connect event fired.
+
+**Validation:**
+
+1. `pnpm install` resolves clean against the M3 lockfile. `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` all pass.
+2. `pnpm dev` starts the Vite server on :5173 with the broker proxy on /api/* targeting :8080.
+3. Login as a user entitled to one or more pools. Launcher renders one card per pool with display_name (not slug), description, status badge, pool type pill, and Connect/Resume button.
+4. Click Connect. Console route renders; toolbar status transitions through "Connecting…" → "Connected to {desktop}". Canvas paints the VM's desktop. Keyboard and mouse input flow to the VM. Send Ctrl+Alt+Del triggers the secure attention sequence (Windows) or the equivalent on Linux.
+5. Click Disconnect. Page navigates to /desktops with the launcher's TanStack cache refetched. For non-persistent pools, the assigned-desktop summary clears; for persistent, the assignment remains with status "disconnected".
+6. Navigate to /sessions. Recent disconnect appears under the "All" filter with the "Disconnected" status badge.
+7. Toggle dark mode. `[data-theme]` flips on `<html>`; cards and badges re-render with dark-mode tokens; brand mark swaps to the dark variant.
+8. Logout. /desktops becomes inaccessible without re-authenticating; the auth user is cleared from localStorage; the TanStack Query cache is cleared (no stale data flash on next login).
+9. The Playwright smoke suite (`pnpm e2e`) passes against a real broker + Proxmox cluster.
+10. The manual acceptance checklist in `portal/README.md` is walked through end-to-end with no failures.
+
+**Explicitly out of scope for this milestone:**
+
+- Real LDAP / JWT authentication (M4).
+- Admin dashboard, admin endpoints, admin-only routes (M4).
+- Pool / template / cluster CRUD UI for admins (M4).
+- Provider conformance test suite (M4).
+- Background workers — pool provisioner, session monitor, health checker, task tracker (M4).
+- Multi-tab session-tracking improvements (M4 session monitor handles dangling sessions until then).
+- KasmVNC display protocol (v1).
+- Mobile / tablet viewport polish — cosmetic in v0.
+- Bundle-size code-splitting; the console route's noVNC payload is in the main bundle (M5+).
+- Real-time updates via websocket; the launcher is fetch-on-mount with TanStack staleTime (M5+).
 
 ### Milestone 4 — "Sessions work, admins can see, conformance is real" (Weekend 4)
 
@@ -462,3 +491,12 @@ npm run dev
 | New cluster enum value `pending` | Clusters start in `pending` pre-first-ping; a background task flips them to `active`/`offline` based on the first `provider.ping()` result. Avoids the wrong implication that a just-inserted row is definitely alive | 2026-04-23 |
 | Audit at two layers (middleware + service) | HTTP middleware catches CRUD mutations with redaction; service layer writes domain events (`broker.connect`, `broker.session.end`) that have no clean HTTP mapping | 2026-04-23 |
 | No users table, AD is source of truth | Entitlements match usernames/group names from the auth context directly; keeping OpenVDI out of identity management | 2026-04-23 |
+| Praxova design-system as visual contract | Praxova products converge on one design language; OpenVDI portal references role tokens (`--color-action-primary`, `--space-4`, etc.) and brand SVGs from `/home/alton/Documents/Praxova/praxova-design-system/`, never raw values | 2026-04-27 |
+| Tailwind theme bridge over vanilla utilities | A restricted `tailwind.config.js` maps each role token to a single Tailwind utility class. `bg-amber-500` doesn't compile — surfaces drift the moment it would otherwise creep in | 2026-04-27 |
+| Browser-direct WebSocket to PVE for noVNC v0 | Vite dev proxy is HTTP-only; PVE's vncwebsocket is wss://. Running both behind one proxy buys nothing in dev and would mask the production-equivalent CORS/cert path. M3 documents that PVE's self-signed cert must be browser-trusted | 2026-04-27 |
+| Header-based dev auth in M3 | M3 lands without LDAP/JWT to keep frontend velocity unblocked. The middleware seam M2-04 introduced has the same `User` shape JWT will produce in M4; only the middleware swaps | 2026-04-27 |
+| StrictMode-safe one-shot connect via `didMountRef` | React 18 dev double-effect would fire two `POST /me/desktops/{id}/connect` calls; the broker's per-user-per-pool advisory lock serializes them but burns an unnecessary VNC ticket on Proxmox. The ref guard makes dev exactly-once | 2026-04-27 |
+| Three keepalive-DELETE cleanup paths fenced by one ref | Explicit Disconnect button + SPA-nav cleanup + beforeunload-tab-close all converge on `fetch(DELETE, { keepalive: true })`, fenced by `disconnectFiredRef` so only one fires per page lifecycle. M4 session monitor recycles whatever escapes | 2026-04-27 |
+| Connect-button always enabled regardless of pool status | Pool state at launcher-paint time can be stale within seconds. StatusBadge communicates state honestly; broker is the source of truth on whether a click succeeds. M3-06 surfaces 503/409 inline | 2026-04-27 |
+| Discriminated-union ticket type with single v0 renderer | `ConsoleTicket = NoVNCTicket | WebMKSTicket | SpiceTicket | RDPTicket`. v0 produces `novnc` only; the union shape lets future renderers (KasmVNC v1) drop in without a backend change | 2026-04-27 |
+| Playwright canvas assertion is dimensional, not visual | Pixel content varies every connection (cursor blink, idle wallpaper, etc). Canvas-exists + non-zero w/h + transitive RFB.connect proof via toolbar status is the right signal for the smoke gate | 2026-04-27 |

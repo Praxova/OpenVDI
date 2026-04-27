@@ -6,3 +6,8 @@ dist
 .idea
 .vscode
 *.tsbuildinfo
+
+# Playwright (M3-08)
+e2e-report/
+test-results/
+playwright-report/
