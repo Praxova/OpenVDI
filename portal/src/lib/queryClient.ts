@@ -2,6 +2,21 @@ import { QueryClient } from "@tanstack/react-query";
 
 import { BrokerError } from "@/api/errors";
 
+// Global error type for every TanStack Query hook in this app. Without
+// this declaration, queries default to `error: Error | null` and pages
+// have to `instanceof BrokerError`-narrow on every error access. With
+// it, useQuery / useMutation infer `error: BrokerError | null`
+// automatically — no per-call type parameter required.
+//
+// `import type` keeps this from creating a runtime cycle between
+// queryClient.ts and errors.ts; the declare module block below is
+// purely compile-time.
+declare module "@tanstack/react-query" {
+  interface Register {
+    defaultError: BrokerError;
+  }
+}
+
 /**
  * Shared TanStack Query client.
  *
