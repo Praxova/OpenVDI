@@ -12,6 +12,12 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // @novnc/novnc@1.6 ships only a `browser` entry in its package.json
+    // (no `main`/`module`/`exports`). Vitest's default SSR-style
+    // resolver doesn't honor `browser`, so the import fails to resolve
+    // even though tests mock the module. Including "browser" first
+    // matches what the production Vite build does.
+    mainFields: ["browser", "module", "main"],
   },
   test: {
     // happy-dom (since M3-03): the AuthContext hook test exercises

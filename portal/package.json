@@ -14,6 +14,7 @@
     "test:types": "vitest run --typecheck"
   },
   "dependencies": {
+    "@novnc/novnc": "^1.4.0",
     "@tanstack/react-query": "^5.51.0",
     "lucide-react": "^0.439.0",
     "react": "^18.3.0",
