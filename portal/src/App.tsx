@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
+import { ConsolePage } from "@/pages/ConsolePage";
 import { DesktopsPage } from "@/pages/DesktopsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
@@ -11,16 +12,16 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
  *   /login                    — public, dev-auth form
  *   /                         — protected, redirects to /desktops
  *   /desktops                 — protected, launcher (M3-04)
- *   /desktops/:poolId/console — protected, console placeholder (M3-06 wires the real one)
+ *   /desktops/:poolId/console — protected, console (M3-06)
  *   /sessions                 — protected, M3-07 sessions (placeholder until then)
  *   *                         — protected, redirects to /desktops
  *
  * The protected branch is wrapped in <ProtectedRoute> + <AppShell>.
  * Pages render inside AppShell's <Outlet />.
  *
- * `PlaceholderPage` stays inline; M3-07 is the cleanup point that
- * deletes it once all three target routes (/desktops, the console
- * route, /sessions) point at real components.
+ * `PlaceholderPage` stays inline for /sessions only; M3-07 is the
+ * cleanup point that deletes it once that route also points at a
+ * real component.
  */
 export default function App() {
   return (
@@ -34,12 +35,7 @@ export default function App() {
             <Route path="/desktops" element={<DesktopsPage />} />
             <Route
               path="/desktops/:poolId/console"
-              element={
-                <PlaceholderPage
-                  title="Console"
-                  hint="The noVNC console arrives in M3-06."
-                />
-              }
+              element={<ConsolePage />}
             />
             <Route
               path="/sessions"
