@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { ConsolePage } from "@/pages/ConsolePage";
 import { DesktopsPage } from "@/pages/DesktopsPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { SessionsPage } from "@/pages/SessionsPage";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 
 /**
@@ -13,15 +14,11 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
  *   /                         — protected, redirects to /desktops
  *   /desktops                 — protected, launcher (M3-04)
  *   /desktops/:poolId/console — protected, console (M3-06)
- *   /sessions                 — protected, M3-07 sessions (placeholder until then)
+ *   /sessions                 — protected, sessions (M3-07)
  *   *                         — protected, redirects to /desktops
  *
  * The protected branch is wrapped in <ProtectedRoute> + <AppShell>.
  * Pages render inside AppShell's <Outlet />.
- *
- * `PlaceholderPage` stays inline for /sessions only; M3-07 is the
- * cleanup point that deletes it once that route also points at a
- * real component.
  */
 export default function App() {
   return (
@@ -37,43 +34,11 @@ export default function App() {
               path="/desktops/:poolId/console"
               element={<ConsolePage />}
             />
-            <Route
-              path="/sessions"
-              element={
-                <PlaceholderPage
-                  title="Sessions"
-                  hint="The sessions view arrives in M3-07."
-                />
-              }
-            />
+            <Route path="/sessions" element={<SessionsPage />} />
             <Route path="*" element={<Navigate to="/desktops" replace />} />
           </Route>
         </Route>
       </Routes>
     </BrowserRouter>
-  );
-}
-
-interface PlaceholderPageProps {
-  title: string;
-  hint: string;
-}
-
-/**
- * Inline placeholder used for /desktops and /sessions until M3-04 and
- * M3-07 land. Once those prompts replace the routes with real pages,
- * this component is unused and should be deleted as part of the
- * cleanup in whichever prompt removes the last reference.
- */
-function PlaceholderPage({ title, hint }: PlaceholderPageProps) {
-  return (
-    <div className="p-6">
-      <section className="max-w-2xl bg-surface-1 border border-border-subtle rounded-lg p-6">
-        <h1 className="font-display text-h2 font-semibold text-text-primary">
-          {title}
-        </h1>
-        <p className="text-body text-text-secondary mt-2">{hint}</p>
-      </section>
-    </div>
   );
 }

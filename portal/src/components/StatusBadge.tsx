@@ -1,4 +1,4 @@
-import type { DesktopStatus, PoolStatus } from "@/types";
+import type { DesktopStatus, PoolStatus, SessionStatus } from "@/types";
 
 export type StatusTone = "info" | "success" | "warning" | "danger" | "neutral";
 
@@ -94,6 +94,33 @@ export function desktopStatusBadge(status: DesktopStatus): BadgeShape {
     case "error":        return { tone: "danger",  label: "Error" };
     case "deleting":     return { tone: "danger",  label: "Deleting" };
     case "maintenance":  return { tone: "warning", label: "Maintenance" };
+  }
+}
+
+/**
+ * Translate a `SessionStatus` to a badge.
+ *
+ * The actual broker enum (`broker/app/models/session.py`) is
+ * `connecting | active | disconnected | ended`. The M3-07 prompt
+ * referenced `errored | timed_out` variants which the broker hasn't
+ * shipped — when those land, extend this switch alongside that
+ * milestone.
+ *
+ *   connecting    → info       "Connecting"   — brokering in flight
+ *   active        → success    "Active"       — currently connected
+ *   disconnected  → neutral    "Disconnected" — clean termination, no signal needed
+ *   ended         → neutral    "Ended"        — terminal state, no signal needed
+ *
+ * `disconnected` and `ended` are both `neutral` rather than `warning`
+ * because both are EXPECTED end states — flagging them as warning-toned
+ * over-emphasizes a non-event.
+ */
+export function sessionStatusBadge(status: SessionStatus): BadgeShape {
+  switch (status) {
+    case "connecting":   return { tone: "info",    label: "Connecting" };
+    case "active":       return { tone: "success", label: "Active" };
+    case "disconnected": return { tone: "neutral", label: "Disconnected" };
+    case "ended":        return { tone: "neutral", label: "Ended" };
   }
 }
 

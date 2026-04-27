@@ -13,7 +13,7 @@ import {
 import { useAuth } from "@/auth/AuthContext";
 import { useConnectMutation } from "@/api/connect";
 import { useDisconnectSessionMutation } from "@/api/sessions";
-import { BrokerError } from "@/api/errors";
+import { brokerErrorCode } from "@/api/errors";
 import type { NoVNCTicketRead, ConnectResponse } from "@/types";
 
 /**
@@ -414,29 +414,27 @@ function ErrorOverlay({ reason, onRetry, onBack, isRetrying }: ErrorOverlayProps
  * remediation, and the broker codes are stable across HTTP statuses.
  */
 function connectErrorMessage(error: Error): string {
-  if (error instanceof BrokerError) {
-    switch (error.code) {
-      case "FORBIDDEN":
-        return "You aren't entitled to this pool. Contact an administrator.";
-      case "NOT_FOUND":
-        return "This pool no longer exists. Return to your desktop list.";
-      case "CONFLICT":
-        return "This pool isn't accepting connections right now. Try again later or pick another pool.";
-      case "POOL_FULL":
-        return "All desktops in this pool are in use. Wait a moment and try again.";
-      case "SERVICE_UNAVAILABLE":
-        return "The hypervisor managing this pool is offline. Contact an administrator.";
-      case "PROVIDER_ERROR":
-        return "The hypervisor returned an error. Try again, or contact an administrator if it persists.";
-      case "PROVIDER_TIMEOUT":
-        return "The hypervisor took too long to respond. Try again.";
-      case "UNAUTHORIZED":
-        return "Your session has expired. Sign out and back in to continue.";
-      case "INTERNAL_ERROR":
-      case "ERROR":
-      default:
-        return "Something went wrong connecting to the desktop. Try again, or contact an administrator if it persists.";
-    }
+  switch (brokerErrorCode(error)) {
+    case "FORBIDDEN":
+      return "You aren't entitled to this pool. Contact an administrator.";
+    case "NOT_FOUND":
+      return "This pool no longer exists. Return to your desktop list.";
+    case "CONFLICT":
+      return "This pool isn't accepting connections right now. Try again later or pick another pool.";
+    case "POOL_FULL":
+      return "All desktops in this pool are in use. Wait a moment and try again.";
+    case "SERVICE_UNAVAILABLE":
+      return "The hypervisor managing this pool is offline. Contact an administrator.";
+    case "PROVIDER_ERROR":
+      return "The hypervisor returned an error. Try again, or contact an administrator if it persists.";
+    case "PROVIDER_TIMEOUT":
+      return "The hypervisor took too long to respond. Try again.";
+    case "UNAUTHORIZED":
+      return "Your session has expired. Sign out and back in to continue.";
+    case "INTERNAL_ERROR":
+    case "ERROR":
+      return "Something went wrong connecting to the desktop. Try again, or contact an administrator if it persists.";
+    default:
+      return "Couldn't reach the broker. Check your connection and try again.";
   }
-  return "Couldn't reach the broker. Check your connection and try again.";
 }

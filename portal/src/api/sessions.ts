@@ -1,18 +1,47 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBrokerClient } from "./client";
 import { desktopsKeys } from "./desktops";
+import type { UserSessionView } from "@/types";
 
 /**
- * Query key factory for the /me/sessions surface. M3-07's
- * useSessionsQuery() will add to this same factory; the disconnect
- * mutation here invalidates `sessionsKeys.all` so a session
- * disconnect from the console is immediately reflected on the
- * sessions view next time the user navigates there.
+ * Query key factory for the /me/sessions surface.
+ *
+ *   sessionsKeys.all              — prefix (M3-06's invalidation
+ *                                   target; matches every key below)
+ *   sessionsKeys.list(included)   — concrete list query, keyed by the
+ *                                   include_ended flag so active-only
+ *                                   and all-sessions caches don't
+ *                                   collide
+ *
+ * Per TanStack Query semantics, invalidating a prefix key invalidates
+ * every key with that prefix — so M3-06's
+ * `invalidateQueries({ queryKey: sessionsKeys.all })` correctly hits
+ * both list variants.
  */
 export const sessionsKeys = {
   all: ["me", "sessions"] as const,
+  list: (includeEnded: boolean) =>
+    ["me", "sessions", "list", { includeEnded }] as const,
 };
+
+/**
+ * Fetch the user's sessions. Pass `includeEnded=true` to include
+ * disconnected/errored/timed_out sessions; otherwise only active.
+ *
+ * The broker default is `include_ended=false`; we always pass the
+ * flag explicitly so the URL is unambiguous in DevTools.
+ */
+export function useSessionsQuery(includeEnded: boolean) {
+  const client = useBrokerClient();
+  return useQuery({
+    queryKey: sessionsKeys.list(includeEnded),
+    queryFn: () =>
+      client.get<UserSessionView[]>(
+        `/api/v1/me/sessions?include_ended=${includeEnded}`,
+      ),
+  });
+}
 
 /**
  * Disconnect a session by id. The broker endpoint is idempotent on

@@ -50,3 +50,19 @@ export class BrokerError extends Error {
     });
   }
 }
+
+/**
+ * Extract the broker error code from an unknown error. Returns null
+ * for non-BrokerError values (transport-layer errors, generic Errors,
+ * thrown strings, etc.).
+ *
+ * Pages dispatch on the returned code to produce context-specific
+ * user-facing messages. The set of codes is the broker's
+ * `error_codes.py` enum — UNAUTHORIZED, FORBIDDEN, NOT_FOUND,
+ * CONFLICT, POOL_FULL, SERVICE_UNAVAILABLE, PROVIDER_ERROR,
+ * PROVIDER_TIMEOUT, INTERNAL_ERROR, ERROR (fallback).
+ */
+export function brokerErrorCode(error: unknown): string | null {
+  if (error instanceof BrokerError) return error.code;
+  return null;
+}

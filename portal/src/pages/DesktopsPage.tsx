@@ -1,6 +1,7 @@
 import { ServerOff, AlertTriangle, RefreshCw } from "lucide-react";
 
 import { useDesktopsQuery } from "@/api/desktops";
+import { brokerErrorCode } from "@/api/errors";
 import { PoolCard } from "@/components/PoolCard";
 import type { UserPoolView } from "@/types";
 
@@ -183,20 +184,15 @@ function ErrorState({ error, onRetry, isRetrying }: ErrorStateProps) {
  * the next step. Never expose internal error details to the user.
  */
 function errorMessageFor(error: Error): string {
-  // The TanStack Register declaration in lib/queryClient.ts pins the
-  // error type to BrokerError. The duck-type check here is defensive
-  // against a future change that swaps the error type.
-  if (error && typeof error === "object" && "code" in error) {
-    const code = (error as { code: string }).code;
-    if (code === "UNAUTHORIZED") {
+  switch (brokerErrorCode(error)) {
+    case "UNAUTHORIZED":
       return "Your session has expired. Sign out and back in to continue.";
-    }
-    if (code === "FORBIDDEN") {
+    case "FORBIDDEN":
       return "You don't have permission to view your desktop list. Contact an administrator.";
-    }
-    if (code === "INTERNAL_ERROR" || code === "ERROR") {
+    case "INTERNAL_ERROR":
+    case "ERROR":
       return "Something went wrong loading your desktops. Try again, or contact an administrator if it persists.";
-    }
+    default:
+      return "We couldn't load your desktops. Try again, or contact an administrator if it persists.";
   }
-  return "We couldn't load your desktops. Try again, or contact an administrator if it persists.";
 }

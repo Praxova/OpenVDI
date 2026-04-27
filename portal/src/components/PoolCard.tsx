@@ -7,6 +7,7 @@ import {
   poolStatusBadge,
   poolTypeBadge,
 } from "./StatusBadge";
+import { formatRelativeTime } from "@/lib/time";
 import type { UserPoolView } from "@/types";
 
 interface PoolCardProps {
@@ -122,49 +123,9 @@ function AssignedDesktopSummary({ desktop }: AssignedDesktopSummaryProps) {
       </div>
       {desktop.last_connected !== null && (
         <p className="text-caption text-text-tertiary mt-1">
-          Last connected {formatLastConnected(desktop.last_connected)}
+          Last connected {formatRelativeTime(desktop.last_connected)}
         </p>
       )}
     </section>
   );
-}
-
-/**
- * Format an ISO 8601 timestamp as a friendly relative-or-absolute.
- *
- * Rough rules:
- *   - <1 minute ago     → "just now"
- *   - <60 minutes ago   → "N minutes ago"
- *   - <24 hours ago     → "N hours ago"
- *   - within last 7d    → weekday + time
- *   - older             → absolute date
- *
- * Intentionally light — no `date-fns` / `dayjs` for one helper used
- * in one place. If M3-07's sessions view wants the same helper,
- * promote to `lib/time.ts` then.
- */
-function formatLastConnected(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso; // graceful fallback
-  const now = Date.now();
-  const diffMs = now - t;
-  const diffMin = Math.round(diffMs / 60_000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? "" : "s"} ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? "" : "s"} ago`;
-  const date = new Date(t);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-  if (diffDays < 7) {
-    return date.toLocaleString(undefined, {
-      weekday: "short",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
 }
