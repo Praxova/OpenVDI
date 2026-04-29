@@ -4,6 +4,7 @@ Importing this package registers every mapped class on Base.metadata.
 """
 from app.database import Base
 from app.models.audit import AuditLog
+from app.models.auth_token import AuthToken
 from app.models.cluster import Cluster, ClusterStatus
 from app.models.desktop import Desktop, DesktopStatus
 from app.models.entitlement import Entitlement
@@ -15,6 +16,7 @@ from app.models.template import Template
 __all__ = [
     "Base",
     "AuditLog",
+    "AuthToken",
     "Cluster",
     "ClusterStatus",
     "Desktop",

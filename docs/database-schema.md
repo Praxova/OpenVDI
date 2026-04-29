@@ -239,6 +239,18 @@ CREATE TABLE entitlements (
 );
 
 -- ============================================================
+-- Auth tokens (M4 — refresh-token persistence for JWT auth)
+-- ============================================================
+CREATE TABLE auth_tokens (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username        VARCHAR(256) NOT NULL,        -- canonical lowercase per A4
+    refresh_hash    BYTEA NOT NULL,               -- bcrypt(refresh_secret_str) per A1
+    expires_at      TIMESTAMPTZ NOT NULL,         -- now() + REFRESH_TOKEN_TTL
+    revoked_at      TIMESTAMPTZ,                  -- non-null when explicitly revoked (logout, M5+ admin tooling)
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
 -- Audit log
 -- ============================================================
 CREATE TABLE audit_log (
@@ -281,6 +293,11 @@ CREATE INDEX idx_sessions_user ON sessions(username);
 CREATE INDEX idx_sessions_active ON sessions(status) WHERE status IN ('connecting', 'active');
 CREATE INDEX idx_entitlements_pool ON entitlements(pool_id);
 CREATE INDEX idx_entitlements_principal ON entitlements(principal_name);
+CREATE INDEX idx_auth_tokens_username ON auth_tokens(username);
+-- Active-token lookup: per-user, unrevoked, expiry comparison.
+-- Predicate is `revoked_at IS NULL` only — `expires_at > now()`
+-- can't be in an index predicate (now() is non-IMMUTABLE).
+CREATE INDEX idx_auth_tokens_active ON auth_tokens(username, expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX idx_audit_timestamp ON audit_log(timestamp);
 CREATE INDEX idx_audit_resource ON audit_log(resource_type, resource_id);
 CREATE INDEX idx_session_metrics_session ON session_metrics(session_id, timestamp);
@@ -339,6 +356,9 @@ Providers without native tag support either simulate tags in a provider-specific
 - **JSONB columns that can be cleared after population MUST be declared with `JSONB(none_as_null=True)`.** SQLAlchemy's default binding writes Python `None` as JSON literal `null` (a 3-character JSON value), not SQL `NULL`. This breaks `WHERE col IS NULL` queries on those rows. The convention is: declare with `none_as_null=True` at the model level AND assign `sqlalchemy.null()` (not Python `None`) at the clearing site. Defense in depth — either fix alone is sufficient; both together prevent regressions. Currently applies to `sessions.connection_info` and `sessions.os_info`. New JSONB columns that can be cleared follow the same convention.
 - **`sessions.desktop_id` is nullable with `ON DELETE SET NULL`.** When a desktop is destroyed (admin DELETE, pool delete, or rebuild leg one), its session rows persist with `desktop_id` set to NULL — the row's continuous-state fields (`protocol`, `connected_at`, `disconnected_at`, `ended_at`, M4's heartbeat / idle / telemetry) survive the desktop's destruction so M3 user-history views and M4 reporting can read them. Endpoints that join sessions to desktops/pools (`/me/sessions`, `/sessions`) use LEFT OUTER joins; orphaned sessions surface with `desktop_name` / `pool_name` rendered as null. `audit_log` (events, not state) is independent and unaffected.
 - **`entitlements.pool_id` is `ON DELETE CASCADE`.** When a pool is destroyed, its entitlement rows are dropped along with it. Entitlements are operational scope ("principal X is allowed to connect to pool Y") with no per-grant continuous-state fields and no referent once the pool is gone. The grant/revoke lifecycle is preserved in `audit_log` (HTTP middleware writes a row for every POST/DELETE on `/pools/{id}/entitlements/...`), which is FK-independent.
+- **`entitlements.principal_name` matching is case-insensitive when `principal_type='user'`** (per A4). LDAP usernames are normalized to canonical lowercase by `LDAPService.authenticate` before they reach the entitlements lookup, and the lookup itself uses `LOWER(principal_name) = LOWER(:username)` semantics. Group matching stays case-sensitive — group names come from LDAP DN attributes which preserve case.
+- **`auth_tokens` is M4 refresh-token persistence.** One row per issued refresh token; `id` is also the JWT's `jti` claim and the id half of the cookie value (`<id>.<secret_str>`). `refresh_hash` is `bcrypt(secret_str)` — the plaintext is sent to the client once at issuance and never persisted. `username` is denormalized (per A9) so admin tooling in M5+ can answer "revoke all tokens for user X" via one indexed query, and is canonical lowercase per A4. `revoked_at` non-null indicates explicit revocation (logout, admin tooling later); expired-but-unrevoked tokens have `revoked_at IS NULL` until cleanup. The partial index `idx_auth_tokens_active` predicates only on `revoked_at IS NULL`; filtering on `expires_at` happens in the query (not the index — `now()` isn't IMMUTABLE).
+- The JWT signing key, LDAP service-account password, and refresh-token plaintext all live in env vars or in transit; **never** in the database. Only ciphertexts (Fernet on cluster credentials, bcrypt on refresh tokens) and irrelevant-by-design data (the JWT `jti` UUID) are persisted.
 - `session_metrics` table is for future OpenVDI in-VM agent; not used in MVP.
 - All timestamps are TIMESTAMPTZ (UTC).
 - The Proxmox-flavored column names (`pve_vmid`, `pve_node`, `pve_task_upid`, `pve_pool_id`) are retained for the v0 single-provider case. When a second provider lands, these columns will be either renamed (generic) or moved into per-desktop JSONB — decided based on what the second provider's data model looks like, not speculatively.

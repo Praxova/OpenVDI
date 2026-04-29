@@ -31,6 +31,7 @@ from app.config import get_settings
 from app.database import Base
 from app.models import (  # noqa: F401  -- import-for-side-effect
     audit,
+    auth_token,
     cluster,
     desktop,
     entitlement,
