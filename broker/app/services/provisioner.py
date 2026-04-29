@@ -83,8 +83,42 @@ _AGENT_POLL_INTERVAL_SECONDS = 2.0
 _POST_BOOT_QUIESCE_SECONDS = 60
 
 
+# ── Refresh-on-logoff cycle timeouts (M4-06) ──────────────────
+# Graceful shutdown can take 2 minutes on Windows (services stopping,
+# pagefile flush). Force-fallback after the timeout escalates to hard
+# stop in the provider layer.
+_REFRESH_GRACEFUL_SHUTDOWN_TIMEOUT = 120
+
+# wait_for_task budgets per provider operation. Tuned conservatively;
+# tighten if observed latencies stay low across a wider deployment.
+_VM_STOP_TASK_TIMEOUT = 60       # Proxmox `stop` task is fast (process kill).
+_VM_ROLLBACK_TASK_TIMEOUT = 300  # Snapshot rollback can be slow on LVM-thin.
+_VM_START_TASK_TIMEOUT = 60      # Boot proper, not OS-up — that's _wait_for_agent.
+_VM_DESTROY_TASK_TIMEOUT = 300   # Disk delete can be slow.
+
+# Power-state polling after a stop/shutdown task completes. The Proxmox
+# task can finish before power_state actually transitions; brief poll.
+_VM_STOPPED_POLL_TIMEOUT = 30
+_VM_STOPPED_POLL_INTERVAL = 1.0
+
+
 class PoolInactive(Exception):
     """Pool is not in 'active' status; provisioning is refused."""
+
+
+class DesktopNotFound(Exception):
+    """The desktop_id passed to refresh_desktop / delete_desktop_on_logoff
+    has no row. Callers (session_monitor in M4-08) should treat as a
+    benign race — the desktop was destroyed between the dispatch and
+    this call.
+    """
+
+
+class InvalidDesktopState(Exception):
+    """Pool flags or desktop status disagree with the requested
+    operation. Caller should NOT retry — the disagreement is structural
+    (wrong pool type, conflicting flags, in-flight cycle elsewhere).
+    """
 
 
 # Tag slug regex: anything not in [a-z0-9_-] collapses to a dash.
@@ -120,6 +154,32 @@ async def _wait_for_agent(
         await asyncio.sleep(_AGENT_POLL_INTERVAL_SECONDS)
     raise asyncio.TimeoutError(
         f"guest agent did not respond within {_AGENT_POLL_TIMEOUT_SECONDS}s"
+    )
+
+
+async def _wait_for_stopped(
+    provider: HypervisorProvider, ref: VMRef,
+) -> None:
+    """Poll get_vm_status until power_state == 'stopped' or timeout.
+
+    Used after `shutdown_vm` / `stop_vm` because Proxmox occasionally
+    completes the task before the VM has fully transitioned (the KVM
+    process is still releasing the disk lock for a fraction of a
+    second). Subsequent operations like rollback or destroy reject
+    while the lock is held.
+
+    Raises asyncio.TimeoutError on failure (caught by the outer handler
+    → desktop marked error per R3).
+    """
+    deadline = time.monotonic() + _VM_STOPPED_POLL_TIMEOUT
+    while time.monotonic() < deadline:
+        status = await provider.get_vm_status(ref)
+        if status.power_state == "stopped":
+            return
+        await asyncio.sleep(_VM_STOPPED_POLL_INTERVAL)
+    raise asyncio.TimeoutError(
+        f"VM did not reach power_state=stopped within "
+        f"{_VM_STOPPED_POLL_TIMEOUT}s"
     )
 
 
@@ -390,3 +450,281 @@ async def provision_desktop(
             vmid, type(e).__name__, e,
         )
         return desktop
+
+
+# ── Refresh-on-logoff cycle (M4-06) ──────────────────────────────
+
+
+async def refresh_desktop(
+    *,
+    session: AsyncSession,
+    provider: HypervisorProvider,
+    desktop_id,
+) -> Desktop | None:
+    """Drive the non-persistent refresh cycle (per R1 + session-tracking.md):
+        graceful shutdown → wait for stopped → rollback openvdi-base
+        → start → wait for agent → mark available + clear floating
+        assignment.
+
+    Returns the Desktop in 'available' (success) or 'error' (failure)
+    state. May return None if the row vanished mid-cycle (e.g. an
+    admin destroyed it concurrently). Caller must inspect
+    desktop.status to distinguish success from failure.
+
+    Per R3: on any step failure, the desktop is flipped to
+    status='error' with error_message populated. assigned_user is
+    cleared on the floating side regardless of success — the user
+    has logged off the OS, so the assignment doesn't survive the
+    cycle.
+
+    Raises:
+      DesktopNotFound: the desktop_id has no row.
+      InvalidDesktopState: pool flags say refresh-on-logoff is disabled,
+        the desktop is not in a recyclable state (currently 'deleting',
+        'maintenance', or already 'provisioning'), or the pool is
+        persistent.
+    """
+    # ── Step 0: load + validate ────────────────────────────────
+    desktop = await session.get(Desktop, desktop_id)
+    if desktop is None:
+        raise DesktopNotFound(f"desktop {desktop_id} not found")
+
+    pool = await session.get(Pool, desktop.pool_id)
+    if pool is None:
+        raise InvalidDesktopState(f"pool {desktop.pool_id} not found")
+    if pool.pool_type != PoolType.NONPERSISTENT:
+        raise InvalidDesktopState(
+            f"refresh_desktop only applies to non-persistent pools "
+            f"(pool {pool.name!r} is {pool.pool_type})"
+        )
+    if not pool.refresh_on_logoff:
+        raise InvalidDesktopState(
+            f"pool {pool.name!r} has refresh_on_logoff=false"
+        )
+    if desktop.status in (
+        DesktopStatus.DELETING,
+        DesktopStatus.MAINTENANCE,
+        DesktopStatus.PROVISIONING,
+    ):
+        raise InvalidDesktopState(
+            f"desktop {desktop.name!r} is in {desktop.status.value}; "
+            f"refusing to refresh"
+        )
+
+    # ── Step 1: enter PROVISIONING (signal in-flight to other callers) ─
+    desktop.status = DesktopStatus.PROVISIONING
+    desktop.error_message = None
+    desktop.pve_task_upid = None
+    desktop.pve_task_kind = None
+    await session.commit()
+
+    ref = VMRef(
+        provider_type=provider.provider_type,
+        data={"node": desktop.pve_node, "vmid": desktop.pve_vmid},
+    )
+
+    try:
+        # ── Step 2: shutdown if running ─────────────────────────
+        # Skip if already stopped — Proxmox 400s on stop-already-stopped.
+        status = await provider.get_vm_status(ref)
+        if status.power_state == "running":
+            shutdown_handle = await provider.shutdown_vm(
+                ref,
+                timeout_seconds=_REFRESH_GRACEFUL_SHUTDOWN_TIMEOUT,
+                force=True,
+            )
+            await provider.wait_for_task(
+                shutdown_handle, timeout_seconds=_VM_STOP_TASK_TIMEOUT,
+            )
+        # Wait for power_state == stopped regardless. The Proxmox task
+        # can complete before the VM actually transitions; the VMM
+        # sometimes holds the disk lock briefly post-task.
+        await _wait_for_stopped(provider, ref)
+
+        # ── Step 3: rollback to openvdi-base ────────────────────
+        # rollback_snapshot is provider-layer idempotent; rolling back
+        # to a snapshot that's already current is a fast no-op.
+        rollback_handle = await provider.rollback_snapshot(
+            ref, "openvdi-base",
+        )
+        await provider.wait_for_task(
+            rollback_handle, timeout_seconds=_VM_ROLLBACK_TASK_TIMEOUT,
+        )
+
+        # ── Step 4: start ───────────────────────────────────────
+        start_handle = await provider.start_vm(ref)
+        await provider.wait_for_task(
+            start_handle, timeout_seconds=_VM_START_TASK_TIMEOUT,
+        )
+
+        # ── Step 5: wait for guest agent ────────────────────────
+        await _wait_for_agent(provider, ref)
+
+        # ── Step 6: success → 'available' + clear floating assignment ─
+        desktop.status = DesktopStatus.AVAILABLE
+        desktop.power_state = "running"
+        desktop.error_message = None
+        # Clear floating assignment (per R1). Persistent assignments
+        # never reach refresh_desktop (validation rejects persistent
+        # pools); the explicit 'floating' guard documents intent and
+        # survives a future widening of the caller surface.
+        if desktop.assignment_type == "floating":
+            desktop.assigned_user = None
+            desktop.assignment_type = None
+        # last_disconnected stamps the cycle; last_connected is left
+        # as the most-recent prior connect time — a future user's
+        # connect overwrites it.
+        desktop.last_disconnected = datetime.now(timezone.utc)
+        await session.commit()
+
+        logger.info(
+            "desktop refreshed",
+            extra={
+                "desktop_id": str(desktop.id),
+                "vmid": desktop.pve_vmid,
+                "pool": pool.name,
+            },
+        )
+        return desktop
+
+    except (ProviderError, asyncio.TimeoutError) as exc:
+        # Per R3: any step failure → 'error' state. The floating
+        # assignment is still cleared — the user has logged off, the
+        # desktop should not appear assigned to them in admin views
+        # even though it's broken.
+        await session.rollback()
+        # Reload after rollback (the in-memory session is dirty after
+        # the Step 1 commit's writes were rolled back).
+        desktop = await session.get(Desktop, desktop_id)
+        if desktop is not None:
+            desktop.status = DesktopStatus.ERROR
+            desktop.error_message = (
+                f"refresh failed: {type(exc).__name__}: {exc}"[:1024]
+            )
+            if desktop.assignment_type == "floating":
+                desktop.assigned_user = None
+                desktop.assignment_type = None
+            await session.commit()
+        logger.error(
+            "desktop refresh failed",
+            extra={
+                "desktop_id": str(desktop_id),
+                "vmid": desktop.pve_vmid if desktop else None,
+                "error": str(exc),
+            },
+        )
+        return desktop  # may be None if the row vanished mid-cycle
+
+
+async def delete_desktop_on_logoff(
+    *,
+    session: AsyncSession,
+    provider: HypervisorProvider,
+    desktop_id,
+) -> None:
+    """Drive the delete-on-logoff cycle (per R2 + session-tracking.md):
+        hard stop → wait for stopped → destroy VM → remove desktop row.
+
+    Returns None on success (the row is gone). On provider failure at
+    any step, the desktop row stays in 'error' state with
+    error_message populated; admin recovery is `POST /desktops/{id}/
+    rebuild` (M2-15) or `DELETE /desktops/{id}` (M2-15) to retry.
+
+    The pool_provisioner worker (M4-09) creates a replacement on its
+    next tick if total_count < max_size — that's the per-R2
+    'replacement' flow. M4-06 doesn't touch it.
+
+    Raises:
+      DesktopNotFound: the desktop_id has no row.
+      InvalidDesktopState: pool flags say delete-on-logoff is disabled,
+        the desktop is in 'deleting' state already (concurrent
+        caller), or the pool is persistent.
+    """
+    # ── Step 0: load + validate ────────────────────────────────
+    desktop = await session.get(Desktop, desktop_id)
+    if desktop is None:
+        raise DesktopNotFound(f"desktop {desktop_id} not found")
+    pool = await session.get(Pool, desktop.pool_id)
+    if pool is None:
+        raise InvalidDesktopState(f"pool {desktop.pool_id} not found")
+    if pool.pool_type != PoolType.NONPERSISTENT:
+        raise InvalidDesktopState(
+            f"delete_desktop_on_logoff only applies to non-persistent pools"
+        )
+    if not pool.delete_on_logoff:
+        raise InvalidDesktopState(
+            f"pool {pool.name!r} has delete_on_logoff=false"
+        )
+    if desktop.status == DesktopStatus.DELETING:
+        # Concurrent caller — bail without modifying. The other caller
+        # owns the cycle.
+        raise InvalidDesktopState(
+            f"desktop {desktop.name!r} is already being deleted"
+        )
+
+    # ── Step 1: mark DELETING ─────────────────────────────────
+    desktop.status = DesktopStatus.DELETING
+    desktop.error_message = None
+    desktop.pve_task_upid = None
+    desktop.pve_task_kind = None
+    await session.commit()
+
+    ref = VMRef(
+        provider_type=provider.provider_type,
+        data={"node": desktop.pve_node, "vmid": desktop.pve_vmid},
+    )
+
+    try:
+        # ── Step 2: hard stop if running ───────────────────────
+        # Hard stop (vs graceful shutdown) — the user has already
+        # logged off, the VM is going away, no value in coordinated
+        # shutdown.
+        status = await provider.get_vm_status(ref)
+        if status.power_state == "running":
+            stop_handle = await provider.stop_vm(ref)
+            await provider.wait_for_task(
+                stop_handle, timeout_seconds=_VM_STOP_TASK_TIMEOUT,
+            )
+        await _wait_for_stopped(provider, ref)
+
+        # ── Step 3: destroy ────────────────────────────────────
+        destroy_handle = await provider.destroy_vm(ref, purge=True)
+        await provider.wait_for_task(
+            destroy_handle, timeout_seconds=_VM_DESTROY_TASK_TIMEOUT,
+        )
+
+        # ── Step 4: remove DB row ──────────────────────────────
+        # Sessions referencing this desktop have desktop_id SET NULL
+        # via M2-15-fix-2's FK behavior — the rows survive for the
+        # M3-07 sessions view (orphaned-desktop case).
+        await session.delete(desktop)
+        await session.commit()
+
+        logger.info(
+            "desktop deleted on logoff",
+            extra={
+                "desktop_id": str(desktop_id),
+                "vmid": desktop.pve_vmid,
+                "pool": pool.name,
+            },
+        )
+        return None
+
+    except (ProviderError, asyncio.TimeoutError) as exc:
+        await session.rollback()
+        desktop = await session.get(Desktop, desktop_id)
+        if desktop is not None:
+            desktop.status = DesktopStatus.ERROR
+            desktop.error_message = (
+                f"delete-on-logoff failed: {type(exc).__name__}: {exc}"[:1024]
+            )
+            await session.commit()
+        logger.error(
+            "desktop delete-on-logoff failed",
+            extra={
+                "desktop_id": str(desktop_id),
+                "vmid": desktop.pve_vmid if desktop else None,
+                "error": str(exc),
+            },
+        )
+        return None
