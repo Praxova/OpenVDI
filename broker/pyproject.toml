@@ -31,6 +31,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Session-scoped event loop so the module-level
+# `app.database.engine` (which caches its asyncpg pool to whatever
+# loop first touched it) doesn't see "Future attached to different
+# loop" errors as later tests run on fresh loops. Workers tests in
+# particular drive the engine through _acquire_leader_lock; sharing
+# the loop avoids needing per-test engine-recreation.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]

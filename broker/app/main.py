@@ -71,6 +71,7 @@ from app.services.provisioner import PoolInactive
 from app.services.session_tracker import InvalidSessionStateError
 from app.services.task_tracker import resume_inflight_tasks
 from app.services.vmid_allocator import VMIDRangeConflict, VMIDRangeExhausted
+from app.workers import WORKERS, WorkerRunner
 
 
 logger = logging.getLogger(__name__)
@@ -261,17 +262,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.task_tracker_tasks: set[asyncio.Task] = set()
     await resume_inflight_tasks(app)
 
+    # ── Workers framework (M4-07) ────────────────────────────
+    # Each worker self-elects a leader via pg_try_advisory_lock; this
+    # broker may end up leading none, some, or all of the registered
+    # workers depending on which leader-locks it acquires. Multi-broker
+    # safe out of the box — see docs/deploy.md → Multi-Broker.
+    runner = WorkerRunner(app, [cls() for cls in WORKERS])
+    app.state.worker_runner = runner
+    await runner.start()
+
     logger.info(
-        "OpenVDI broker ready: %d provider(s), %d ping task(s), %d resumed task(s)",
+        "OpenVDI broker ready: %d provider(s), %d ping task(s), "
+        "%d resumed task(s), %d worker(s)",
         len(app.state.providers),
         len(app.state.ping_tasks),
         len(app.state.task_tracker_tasks),
+        len(WORKERS),
     )
 
     try:
         yield
     finally:
         logger.info("OpenVDI broker shutting down")
+        # Stop workers FIRST — they hold lock-holder connections from
+        # the engine pool that need to release before dispose_engine().
+        await app.state.worker_runner.stop()
         # Drain in-flight pings + task-tracker pollers. return_exceptions=True
         # so a failed task doesn't mask a second error during cleanup.
         all_tasks = list(app.state.ping_tasks) + list(
