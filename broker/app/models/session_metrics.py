@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
@@ -25,6 +26,9 @@ from app.database import Base
 
 class SessionMetrics(Base):
     __tablename__ = "session_metrics"
+    __table_args__ = (
+        Index("idx_session_metrics_session", "session_id", "timestamp"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     session_id: Mapped[uuid.UUID] = mapped_column(

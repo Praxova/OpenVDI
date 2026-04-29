@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     String,
     UniqueConstraint,
     func,
@@ -28,6 +29,8 @@ class Entitlement(Base):
             "pool_id", "principal_type", "principal_name",
             name="entitlements_pool_principal_uq",
         ),
+        Index("idx_entitlements_pool", "pool_id"),
+        Index("idx_entitlements_principal", "principal_name"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SQLEnum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -47,6 +48,13 @@ class Desktop(Base):
     __tablename__ = "desktops"
     __table_args__ = (
         UniqueConstraint("pve_vmid", name="desktops_pve_vmid_uq"),
+        Index("idx_desktops_pool", "pool_id"),
+        Index(
+            "idx_desktops_assigned", "assigned_user",
+            postgresql_where=text("assigned_user IS NOT NULL"),
+        ),
+        Index("idx_desktops_status", "status"),
+        Index("idx_desktops_vmid", "pve_vmid"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

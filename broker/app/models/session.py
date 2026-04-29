@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SQLEnum,
     ForeignKey,
+    Index,
     String,
     func,
     text,
@@ -36,6 +37,14 @@ def _session_status_values(e: type[enum.Enum]) -> list[str]:
 
 class Session(Base):
     __tablename__ = "sessions"
+    __table_args__ = (
+        Index("idx_sessions_desktop", "desktop_id"),
+        Index("idx_sessions_user", "username"),
+        Index(
+            "idx_sessions_active", "status",
+            postgresql_where=text("status IN ('connecting', 'active')"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),

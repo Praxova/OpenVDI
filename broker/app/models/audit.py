@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     DateTime,
+    Index,
     String,
     func,
 )
@@ -22,6 +23,10 @@ from app.database import Base
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("idx_audit_timestamp", "timestamp"),
+        Index("idx_audit_resource", "resource_type", "resource_id"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     timestamp: Mapped[datetime] = mapped_column(
