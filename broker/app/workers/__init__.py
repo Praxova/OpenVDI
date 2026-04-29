@@ -17,9 +17,17 @@ in the list; the class stays available for ad-hoc smokes.
 """
 from app.workers.base import Worker, WorkerRunner
 from app.workers.echo import EchoWorker
+from app.workers.session_monitor import SessionMonitorWorker
 
 # Workers spawned at lifespan startup. Order doesn't matter — each
-# is independent.
-WORKERS: list[type[Worker]] = [EchoWorker]
+# is independent. EchoWorker is no longer in the active set; the
+# class stays available in the package for ad-hoc smokes.
+WORKERS: list[type[Worker]] = [SessionMonitorWorker]
 
-__all__ = ["Worker", "WorkerRunner", "WORKERS", "EchoWorker"]
+__all__ = [
+    "Worker",
+    "WorkerRunner",
+    "WORKERS",
+    "EchoWorker",
+    "SessionMonitorWorker",
+]
