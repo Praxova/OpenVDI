@@ -46,7 +46,7 @@ from app.api.router import admin_router, user_router
 from app.config import get_settings
 from app.database import async_session_factory, dispose_engine
 from app.middleware.audit import AuditMiddleware
-from app.middleware.auth import DevAuthMiddleware
+from app.middleware.auth import DevAuthMiddleware, JWTAuthMiddleware
 from app.models import Cluster, ClusterStatus
 from app.providers.base import HypervisorProvider
 from app.providers.exceptions import (
@@ -303,12 +303,27 @@ app = FastAPI(
 # ── Middleware ────────────────────────────────────────────────
 #
 # add_middleware is LIFO — the LAST added runs OUTERMOST. Target order
-# outermost → innermost:  DevAuth → Audit → handlers.
-#   DevAuth must run first so it sets request.state.user.
+# outermost → innermost:  Auth → Audit → handlers.
+#   Auth must run first so it sets request.state.user.
 #   Audit runs next so it can record the actor.
-# Hence Audit is added first (inner), DevAuth is added second (outer).
+# Hence Audit is added first (inner), Auth is added second (outer).
+#
+# Mode-conditional pick: the DevAuth path stays for local development
+# against the M2 X-Dev-* header contract; production runs JWTAuth
+# against the access tokens M4-04's auth endpoints issue. Switching
+# modes requires a broker restart — settings is read once at module
+# import (add_middleware must be called before the app accepts
+# requests, which is before lifespan runs).
 app.add_middleware(AuditMiddleware)      # innermost: reads request.state.user
-app.add_middleware(DevAuthMiddleware)    # outermost: sets request.state.user
+if get_settings().is_dev_auth:
+    app.add_middleware(DevAuthMiddleware)
+    logger.warning(
+        "Auth middleware: DevAuth (X-Dev-* headers). Set "
+        "OPENVDI_AUTH_MODE=jwt for production."
+    )
+else:
+    app.add_middleware(JWTAuthMiddleware)
+    logger.info("Auth middleware: JWT (Bearer access token)")
 
 
 # ── Dependencies ──────────────────────────────────────────────

@@ -25,6 +25,7 @@ from app.services.auth_service import (
     parse_groups_header,
     parse_role_header,
 )
+from app.services.jwt_service import InvalidAccessTokenError
 
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,114 @@ class DevAuthMiddleware:
         state = scope.setdefault("state", {})
         state["user"] = User(
             username=username, groups=groups, role=role,
+        )
+
+        await self.app(scope, receive, send)
+
+
+class JWTAuthMiddleware:
+    """Pure-ASGI JWT auth (M4-05). Validates an
+    `Authorization: Bearer <access-token>` header on each request, maps
+    the validated claims to `User`, and stashes it on
+    `scope["state"]["user"]`.
+
+    Bypasses /health, /docs/*, /api/v1/auth/* (login/refresh/logout
+    must be reachable unauthenticated). Bypasses websocket and lifespan
+    scopes. Returns 401 on missing/malformed/expired/invalid tokens.
+
+    The JWTService is read from `scope["app"].state.jwt_service` per
+    request, NOT cached at middleware-construction time. Middleware
+    construction happens at app definition (before lifespan runs); the
+    service is set by the lifespan handler (M4-04).
+
+    Pure-ASGI (not BaseHTTPMiddleware) for the same reason
+    DevAuthMiddleware is — see m2-11-fix-asgi-middleware.md.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if (
+            path in _BYPASS_PATHS
+            or any(path.startswith(p) for p in _BYPASS_PREFIXES)
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        # 1. Authorization header presence.
+        auth_header = _get_header(scope, "Authorization")
+        if not auth_header:
+            await _send_json_response(send, 401, {
+                "data": None,
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Authorization header required",
+                },
+            })
+            return
+
+        # 2. Parse "Bearer <token>" per RFC 6750 §2.1. Tolerant of
+        #    leading/trailing whitespace and case-insensitive scheme.
+        scheme, _, token = auth_header.partition(" ")
+        token = token.strip()
+        if scheme.lower() != "bearer" or not token:
+            await _send_json_response(send, 401, {
+                "data": None,
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Authorization header must be 'Bearer <token>'",
+                },
+            })
+            return
+
+        # 3. Validate via the JWTService on app.state. Defensive: if
+        #    lifespan didn't set it (jwt mode but startup misconfigured),
+        #    treat as 503 — the broker is in an invalid state, not the
+        #    request.
+        app = scope.get("app")
+        jwt_service = getattr(app.state, "jwt_service", None) if app else None
+        if jwt_service is None:
+            logger.error(
+                "JWTAuthMiddleware reached without app.state.jwt_service set"
+            )
+            await _send_json_response(send, 503, {
+                "data": None,
+                "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "Authentication service is not initialized",
+                },
+            })
+            return
+
+        try:
+            claims = jwt_service.validate_access_token(token)
+        except InvalidAccessTokenError:
+            # Don't differentiate expired / bad-signature / malformed
+            # in the response — same security argument as M4-04's
+            # auth endpoints.
+            await _send_json_response(send, 401, {
+                "data": None,
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Invalid or expired access token",
+                },
+            })
+            return
+
+        # 4. Construct the User and attach to scope state. The shape
+        #    matches M2's DevAuth-produced User exactly so downstream
+        #    handlers don't notice the swap.
+        state = scope.setdefault("state", {})
+        state["user"] = User(
+            username=claims.sub,
+            groups=claims.groups,
+            role=claims.role,
         )
 
         await self.app(scope, receive, send)
