@@ -41,7 +41,9 @@ from sqlalchemy import select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
+from app.api.auth import auth_router
 from app.api.router import admin_router, user_router
+from app.config import get_settings
 from app.database import async_session_factory, dispose_engine
 from app.middleware.audit import AuditMiddleware
 from app.middleware.auth import DevAuthMiddleware
@@ -63,6 +65,8 @@ from app.services.broker import (
     PoolInactiveError,
 )
 from app.services.cluster_service import construct_provider, ping_and_update_status
+from app.services.jwt_service import JWTService
+from app.services.ldap_service import LDAPService
 from app.services.provisioner import PoolInactive
 from app.services.session_tracker import InvalidSessionStateError
 from app.services.task_tracker import resume_inflight_tasks
@@ -73,22 +77,6 @@ logger = logging.getLogger(__name__)
 
 
 # ── Startup guards & logging ──────────────────────────────────
-
-def _ensure_dev_auth_mode() -> None:
-    """Refuse to start unless OPENVDI_AUTH_MODE=dev is set.
-
-    F1 gate: M2 ships header-based fake auth (X-Dev-User, X-Dev-Groups,
-    X-Dev-Role). The broker should never accidentally end up serving
-    real users with this, so we require an explicit opt-in.
-    """
-    mode = os.environ.get("OPENVDI_AUTH_MODE")
-    if mode != "dev":
-        raise RuntimeError(
-            "OpenVDI M2 runs in header-based dev-auth mode (X-Dev-User, "
-            "X-Dev-Groups, X-Dev-Role). Set OPENVDI_AUTH_MODE=dev to "
-            "acknowledge this is intentional. Production LDAP/JWT auth "
-            "lands in Milestone 4."
-        )
 
 
 def _ensure_encryption_key() -> None:
@@ -193,10 +181,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup: construct providers + spawn pings.
     Shutdown: drain pings, close providers, dispose engine.
     """
-    _ensure_dev_auth_mode()
     _ensure_encryption_key()
     _configure_logging()
     logger.info("OpenVDI broker starting")
+
+    # Auth-mode gating. Settings's model validator already enforces the
+    # required env-var set in jwt mode (M4-02); we just construct the
+    # services here. In dev mode app.state.{jwt,ldap}_service stay None
+    # and the dependency factories raise 503 AUTH_MODE_NOT_SUPPORTED.
+    settings = get_settings()
+    if settings.openvdi_auth_mode == "jwt":
+        app.state.jwt_service = JWTService(settings)
+        app.state.ldap_service = LDAPService(settings)
+        logger.info("JWT auth services initialized")
+    else:
+        app.state.jwt_service = None
+        app.state.ldap_service = None
+        logger.warning(
+            "Broker started in DEV auth mode — JWT endpoints disabled. "
+            "Set OPENVDI_AUTH_MODE=jwt for production."
+        )
 
     app.state.providers: dict[UUID, HypervisorProvider] = {}
     app.state.ping_tasks: set[asyncio.Task] = set()
@@ -596,6 +600,7 @@ from app.api import (  # noqa: E402, F401  (import-for-side-effect)
 # elsewhere in this module (e.g. in _is_admin).
 from app.api import user as _user_api  # noqa: E402, F401
 
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1/me")
 

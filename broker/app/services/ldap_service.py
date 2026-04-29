@@ -18,6 +18,7 @@ import logging
 import ssl
 from dataclasses import dataclass
 
+from fastapi import HTTPException, Request
 from ldap3 import ALL, Connection, SUBTREE, Server, Tls
 from ldap3.core.exceptions import (
     LDAPBindError,
@@ -292,3 +293,107 @@ class LDAPService:
         # comparison. Admin group config might be entered as
         # "OpenVDI-Admins" or "openvdi-admins"; either matches.
         return any(g.casefold() == admin_group.casefold() for g in groups)
+
+    # ── Lookup-only path (M4-04) ──────────────────────────────
+
+    async def lookup_user(self, canonical_username: str) -> LDAPAuthResult:
+        """Look up a user's groups + admin status without verifying
+        their password. Used by /auth/refresh to refresh claims without
+        re-prompting for credentials.
+
+        Two LDAP roundtrips: service-account search for the user's DN,
+        then a group-search filtered to that DN. No user-bind step (the
+        refresh cookie already proves the user authenticated successfully
+        at some point within the refresh-token TTL).
+
+        Raises:
+          LDAPAuthError if the user no longer exists in LDAP (e.g. their
+            AD account was deleted between login and refresh).
+          LDAPServiceError on any infrastructure failure.
+        """
+        if not canonical_username:
+            raise LDAPAuthError("invalid username")
+        return await asyncio.to_thread(
+            self._lookup_blocking, canonical_username,
+        )
+
+    def _lookup_blocking(
+        self, canonical_username: str,
+    ) -> LDAPAuthResult:
+        """Sync impl — runs in a worker thread.
+
+        Two binds (service-account for user search; service-account again
+        for group search). Mirrors `_authenticate_blocking` minus the
+        user-bind credential check.
+        """
+        s = self._settings
+        server = self._make_server()
+
+        try:
+            with self._connect(
+                server,
+                s.openvdi_ldap_bind_dn,
+                s.openvdi_ldap_bind_password.get_secret_value(),
+            ) as svc_conn:
+                user_dn = self._search_user_dn(svc_conn, canonical_username)
+        except LDAPBindError as exc:
+            raise LDAPServiceError(
+                f"LDAP service-account bind failed: {exc}"
+            ) from exc
+        except LDAPException as exc:
+            raise LDAPServiceError(
+                f"LDAP error during lookup: {exc}"
+            ) from exc
+
+        if user_dn is None:
+            logger.info(
+                "LDAP lookup failed: user no longer exists",
+                extra={"username": canonical_username},
+            )
+            raise LDAPAuthError("user no longer exists in LDAP")
+
+        try:
+            with self._connect(
+                server,
+                s.openvdi_ldap_bind_dn,
+                s.openvdi_ldap_bind_password.get_secret_value(),
+            ) as svc_conn2:
+                groups = self._search_groups(svc_conn2, user_dn)
+        except LDAPException as exc:
+            raise LDAPServiceError(
+                f"LDAP error during group search: {exc}"
+            ) from exc
+
+        is_admin = self._is_admin(groups)
+        return LDAPAuthResult(
+            username=canonical_username,
+            user_dn=user_dn,
+            groups=groups,
+            is_admin=is_admin,
+        )
+
+
+# ── FastAPI dependency factory ────────────────────────────────
+
+
+def get_ldap_service(request: Request) -> LDAPService:
+    """FastAPI dependency. Returns the shared LDAPService from app.state.
+
+    Raises 503 with code AUTH_MODE_NOT_SUPPORTED if the broker is in
+    dev mode (ldap_service is None on app.state in dev mode — see
+    app/main.py lifespan).
+    """
+    svc = getattr(request.app.state, "ldap_service", None)
+    if svc is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "AUTH_MODE_NOT_SUPPORTED",
+                "message": (
+                    "JWT auth endpoints are disabled when "
+                    "OPENVDI_AUTH_MODE=dev. Use the M2 X-Dev-* "
+                    "header path for local development."
+                ),
+            },
+        )
+    return svc

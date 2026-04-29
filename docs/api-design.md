@@ -6,25 +6,69 @@ FastAPI REST API serving both the admin dashboard and user-facing web portal. JW
 
 ## Authentication
 
-- Users authenticate via `POST /api/v1/auth/login` with AD/LDAP credentials
-- Server returns a JWT access token (short-lived, ~15 min) and refresh token (~24 hours)
-- All subsequent requests include `Authorization: Bearer <token>`
-- Token contains: `sub` (username), `groups` (AD group memberships), `role` (admin/user)
-- Admin role determined by membership in a configurable AD group
+OpenVDI uses JWT-based authentication backed by LDAP/AD. Three endpoints under `/api/v1/auth` constitute the auth surface. All other endpoints require a valid access token in the `Authorization: Bearer <token>` header (per the M4 middleware).
 
-### M2 Dev-Mode Authentication
+### Tokens
 
-M2 ships **header-based fake authentication** to unblock API development before the LDAP/JWT stack lands in M4. The middleware reads three headers on every request and constructs the same in-memory `User` shape that the JWT path will produce later:
+- **Access token** — HS256-signed JWT, 15-minute TTL. Carries `sub` (canonical lowercase username), `groups[]`, `role`, `iat`, `exp`, and `jti` claims. Stateless; the broker validates the signature locally and trusts the claims for the token's lifetime.
+- **Refresh token** — opaque `<id>.<secret>` payload stored in an HttpOnly + Secure + SameSite=Strict cookie at `/api/v1/auth`. 24-hour TTL. The id half is the `auth_tokens` row id; the secret half is bcrypt-verified against `auth_tokens.refresh_hash`.
+
+The portal stores the access token in memory (React state) and lets the browser manage the refresh cookie. Same-origin deployment is required for SameSite=Strict to permit the cookie on `/auth/refresh` calls — see `docs/deploy.md` → *Same-Origin Requirement*.
+
+### Endpoints
+
+#### `POST /api/v1/auth/login`
+
+Request body:
+```json
+{"username": "alice", "password": "..."}
+```
+
+Response (200):
+```json
+{
+  "data": {
+    "access_token": "eyJhbGc...",
+    "expires_in": 900,
+    "role": "user"
+  },
+  "error": null
+}
+```
+
+`Set-Cookie: refresh_token=<id>.<secret>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=86400`
+
+Errors:
+- `401 UNAUTHORIZED` — invalid credentials.
+- `503 SERVICE_UNAVAILABLE` — LDAP unreachable.
+
+#### `POST /api/v1/auth/refresh`
+
+No request body. Reads the refresh cookie. On success returns a fresh access token + a rotated refresh cookie (same id, new secret). The refresh path also re-fetches the user's groups + admin status from LDAP, so privilege changes propagate within `expires_in` seconds of the next refresh.
+
+Errors:
+- `401 UNAUTHORIZED` — cookie missing, malformed, expired, revoked, or secret mismatch (a single response covers all five — distinguishing them would leak information).
+- `503 SERVICE_UNAVAILABLE` — LDAP unreachable.
+
+#### `POST /api/v1/auth/logout`
+
+No request body. Revokes the refresh row (sets `revoked_at`) and clears the cookie. Always returns `204 No Content` — idempotent. Logout never returns 4xx; a missing or malformed cookie still produces 204.
+
+### Token revocation posture
+
+Access tokens are stateless — the 15-minute TTL is the security boundary. Logout revokes the refresh row; previously-issued access tokens remain valid until they expire. Emergency revocation of all access tokens requires rotating `OPENVDI_JWT_SECRET` and restarting all brokers.
+
+### Dev-mode authentication (development only)
+
+The M2 `X-Dev-User` / `X-Dev-Groups` / `X-Dev-Role` header path is preserved behind `OPENVDI_AUTH_MODE=dev`. In dev mode, the JWT endpoints under `/api/v1/auth` return `503 AUTH_MODE_NOT_SUPPORTED` — local development uses headers, not JWTs.
+
+The broker's default is `OPENVDI_AUTH_MODE=jwt`; production deployments don't need to set anything (the M4-02 model validator enforces the required env-var set when in jwt mode). See `docs/deploy.md` → *Environment Variables* for the production env-var set.
 
 | Header | Meaning |
 |--------|---------|
 | `X-Dev-User` | Username (e.g. `jsmith`) |
 | `X-Dev-Groups` | Comma-separated AD group names (e.g. `Engineering,VPN Users`) |
 | `X-Dev-Role` | `admin` or `user` |
-
-Admin endpoints assert `role == admin`; user endpoints assert `role` is set. Missing or malformed headers produce a 401. In M4 this middleware is replaced with JWT validation — the downstream handlers and dependencies read from `request.state.user` in both modes and are unaffected by the switch.
-
-This is a **development convenience, not a security boundary**. The broker MUST refuse to start in dev-auth mode unless an explicit `OPENVDI_AUTH_MODE=dev` env var is set.
 
 ## Admin Endpoints
 

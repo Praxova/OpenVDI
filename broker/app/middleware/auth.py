@@ -30,14 +30,19 @@ from app.services.auth_service import (
 logger = logging.getLogger(__name__)
 
 
-# Paths that bypass auth entirely. Kept identical to M2-10's list.
+# Paths that bypass auth entirely. M2-10's original list plus
+# /api/v1/auth/ (M4-04): the auth endpoints predate authentication
+# and must be reachable by unauthenticated clients (otherwise login
+# is impossible). Endpoints under /api/v1/auth own their own access
+# control via dependency factories (M4-04 dev-mode 503; M4-04 auth
+# logic itself).
 _BYPASS_PATHS: frozenset[str] = frozenset({
     "/health",
     "/docs",
     "/openapi.json",
     "/redoc",
 })
-_BYPASS_PREFIXES: tuple[str, ...] = ("/docs/",)
+_BYPASS_PREFIXES: tuple[str, ...] = ("/docs/", "/api/v1/auth/")
 
 
 def _get_header(scope: dict, name: str) -> str:

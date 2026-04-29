@@ -23,6 +23,7 @@ from typing import Final, Literal
 from uuid import UUID
 
 import bcrypt
+from fastapi import HTTPException, Request
 from jose import JWTError, jwt
 
 from app.config import Settings
@@ -238,3 +239,29 @@ class JWTService:
             # strings (e.g. truncated rows from a corrupt DB). Treat
             # as verification failure.
             return False
+
+
+# ── FastAPI dependency factory ────────────────────────────────
+
+
+def get_jwt_service(request: Request) -> JWTService:
+    """FastAPI dependency. Returns the shared JWTService from app.state.
+
+    Raises 503 with code AUTH_MODE_NOT_SUPPORTED if the broker is in
+    dev mode (jwt_service is None on app.state in dev mode — see
+    app/main.py lifespan).
+    """
+    svc = getattr(request.app.state, "jwt_service", None)
+    if svc is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "AUTH_MODE_NOT_SUPPORTED",
+                "message": (
+                    "JWT auth endpoints are disabled when "
+                    "OPENVDI_AUTH_MODE=dev. Use the M2 X-Dev-* "
+                    "header path for local development."
+                ),
+            },
+        )
+    return svc

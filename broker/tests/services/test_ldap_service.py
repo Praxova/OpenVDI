@@ -278,3 +278,57 @@ async def test_multiple_user_matches_is_service_error(
     svc = LDAPService(ldap_settings)
     with pytest.raises(LDAPServiceError):
         await svc.authenticate("alice", "pw")
+
+
+# ── lookup_user (M4-04) ──────────────────────────────────────
+
+
+async def test_lookup_user_happy_path(ldap_settings, ldap_mocker):
+    """lookup_user returns LDAPAuthResult without doing a user-bind.
+
+    Two Connection constructions: service-search for the DN, service
+    again for the group search. No middle user-bind step.
+    """
+    ldap_mocker.queue(
+        {"entries": [_entry(dn="CN=Alice,OU=Users,DC=example,DC=com")]},
+        {"entries": [
+            _entry(cn="Engineering"),
+            _entry(cn="OpenVDI-Admins"),
+        ]},
+    )
+    svc = LDAPService(ldap_settings)
+    result = await svc.lookup_user("alice")
+    assert isinstance(result, LDAPAuthResult)
+    assert result.username == "alice"
+    assert result.is_admin is True
+    # Two constructions exactly — no user-bind step.
+    assert len(ldap_mocker.constructions) == 2
+
+
+async def test_lookup_user_no_longer_exists_raises_auth_error(
+    ldap_settings, ldap_mocker,
+):
+    """User search returns 0 entries → LDAPAuthError ("user no longer
+    exists in LDAP"). Refresh endpoint maps this to 401.
+    """
+    ldap_mocker.queue(
+        {"entries": []},
+    )
+    svc = LDAPService(ldap_settings)
+    with pytest.raises(LDAPAuthError):
+        await svc.lookup_user("ghost")
+    assert len(ldap_mocker.constructions) == 1
+
+
+async def test_lookup_user_service_bind_failure_is_service_error(
+    ldap_settings, ldap_mocker,
+):
+    """Service-account bind raises → LDAPServiceError. Refresh maps
+    this to 503 so the portal can retry.
+    """
+    ldap_mocker.queue(
+        {"raises": LDAPBindError("svc account locked")},
+    )
+    svc = LDAPService(ldap_settings)
+    with pytest.raises(LDAPServiceError):
+        await svc.lookup_user("alice")
