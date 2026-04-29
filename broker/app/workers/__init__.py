@@ -17,17 +17,24 @@ in the list; the class stays available for ad-hoc smokes.
 """
 from app.workers.base import Worker, WorkerRunner
 from app.workers.echo import EchoWorker
+from app.workers.pool_provisioner import PoolProvisionerWorker
 from app.workers.session_monitor import SessionMonitorWorker
 
 # Workers spawned at lifespan startup. Order doesn't matter — each
-# is independent. EchoWorker is no longer in the active set; the
-# class stays available in the package for ad-hoc smokes.
-WORKERS: list[type[Worker]] = [SessionMonitorWorker]
+# is its own asyncio task with its own leader lock; in a multi-broker
+# deployment they may be led by different brokers. EchoWorker is no
+# longer in the active set; the class stays available for ad-hoc
+# smokes.
+WORKERS: list[type[Worker]] = [
+    SessionMonitorWorker,
+    PoolProvisionerWorker,
+]
 
 __all__ = [
     "Worker",
     "WorkerRunner",
     "WORKERS",
     "EchoWorker",
+    "PoolProvisionerWorker",
     "SessionMonitorWorker",
 ]
