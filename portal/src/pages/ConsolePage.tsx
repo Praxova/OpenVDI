@@ -33,7 +33,7 @@ import type { NoVNCTicketRead, ConnectResponse } from "@/types";
 export function ConsolePage() {
   const { poolId } = useParams<{ poolId: string }>();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { state, getAccessToken } = useAuth();
 
   const connectMutation = useConnectMutation();
   const disconnectMutation = useDisconnectSessionMutation();
@@ -112,22 +112,20 @@ export function ConsolePage() {
     const fireKeepalive = () => {
       const sessionId = sessionIdRef.current;
       if (sessionId === null || disconnectFiredRef.current) return;
-      if (currentUser === null) return;
+      if (state.status !== "authenticated") return;
+      const token = getAccessToken();
+      if (token === null) return;
       disconnectFiredRef.current = true;
-      // Headers mirror BrokerClientProvider's getAuthHeaders. Inline
-      // here because the keepalive path doesn't go through BrokerClient
-      // (we want the literal `fetch(..., { keepalive: true })` API).
-      // M4 LDAP swap will need to update this site AND the
-      // BrokerClientProvider in the same diff — search for "X-Dev-User"
-      // to find both.
+      // Inline bearer + credentials, parallel to BrokerClient's
+      // attempt() — the keepalive path doesn't go through BrokerClient
+      // because we need the literal `fetch(..., { keepalive: true })`
+      // API. No 401-refresh-replay here: the page is being torn down,
+      // there's no React tree to drive a refresh into.
       try {
         void fetch(`/api/v1/me/sessions/${sessionId}`, {
           method: "DELETE",
-          headers: {
-            "X-Dev-User": currentUser.username,
-            "X-Dev-Groups": currentUser.groups.join(","),
-            "X-Dev-Role": currentUser.role,
-          },
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: "include",
           keepalive: true,
         });
       } catch {
@@ -142,10 +140,10 @@ export function ConsolePage() {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       // SPA navigation away. The user clicked another nav link or
       // back button — clean up the broker-side session so it doesn't
-      // dangle until M4's session monitor reaps it.
+      // dangle until the session_monitor worker reaps it.
       fireKeepalive();
     };
-  }, [currentUser]);
+  }, [state, getAccessToken]);
 
   // ── Viewer event handlers ─────────────────────────────────
 

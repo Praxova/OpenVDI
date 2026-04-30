@@ -4,7 +4,4 @@ export {
   BrokerClientContext,
   useBrokerClient,
 } from "./client";
-export type {
-  AuthHeadersProvider,
-  BrokerClientOptions,
-} from "./client";
+export type { BrokerClientOptions } from "./client";

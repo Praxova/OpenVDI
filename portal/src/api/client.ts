@@ -3,19 +3,6 @@ import { createContext, useContext } from "react";
 import type { APIResponse } from "@/types";
 import { BrokerError } from "./errors";
 
-/**
- * Function the auth context exposes to the BrokerClient. Returns the
- * headers to inject on every request. `{}` is a valid return value
- * (no auth) but BrokerClient does not assume anything about contents
- * — the caller decides what's authoritative.
- *
- * In M3, this returns `{ "X-Dev-User": ..., "X-Dev-Groups": ..., "X-Dev-Role": ... }`
- * for an authenticated dev session, or `{}` if unauthenticated.
- *
- * In M4, it returns `{ Authorization: "Bearer ..." }`. Same seam.
- */
-export type AuthHeadersProvider = () => Record<string, string>;
-
 export interface BrokerClientOptions {
   /**
    * Base URL for API requests. In dev: an empty string (so requests go
@@ -25,8 +12,16 @@ export interface BrokerClientOptions {
    */
   baseUrl: string;
 
-  /** Producer for the per-request auth headers. */
-  getAuthHeaders: AuthHeadersProvider;
+  /** Returns the current access token, or null if not authenticated.
+      Called on every outgoing non-auth request to inject the bearer
+      header. */
+  getAccessToken: () => string | null;
+
+  /** Called when the broker returns 401 on a non-auth endpoint.
+      Triggers a refresh; returns the new access token (or null if
+      refresh failed). De-duplication is the caller's responsibility
+      (AuthContext does this via its in-flight-promise ref). */
+  onUnauthorized: () => Promise<string | null>;
 
   /**
    * Override for `fetch`. Defaults to the global. Tests inject a
@@ -35,20 +30,27 @@ export interface BrokerClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+const AUTH_ENDPOINT_PREFIX = "/api/v1/auth/";
+
 export class BrokerClient {
   private readonly baseUrl: string;
-  private readonly getAuthHeaders: AuthHeadersProvider;
+  private readonly getAccessToken: () => string | null;
+  private readonly onUnauthorized: () => Promise<string | null>;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: BrokerClientOptions) {
     this.baseUrl = opts.baseUrl;
-    this.getAuthHeaders = opts.getAuthHeaders;
+    this.getAccessToken = opts.getAccessToken;
+    this.onUnauthorized = opts.onUnauthorized;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
   // ── Public verb-shaped helpers ──────────────────────────────
 
-  async get<T>(path: string, init?: Omit<RequestInit, "method" | "body">): Promise<T> {
+  async get<T>(
+    path: string,
+    init?: Omit<RequestInit, "method" | "body">,
+  ): Promise<T> {
     return this.request<T>("GET", path, undefined, init);
   }
 
@@ -90,25 +92,57 @@ export class BrokerClient {
     body: unknown,
     init: Omit<RequestInit, "method" | "body"> | undefined,
   ): Promise<T> {
+    const isAuthEndpoint = path.startsWith(AUTH_ENDPOINT_PREFIX);
+
+    let response = await this.attempt(method, path, body, init, isAuthEndpoint);
+
+    // On 401 from a non-auth endpoint, try a refresh + replay. One
+    // attempt only — looping risks request → refresh → 401 → ...
+    // in a broken-state cluster.
+    if (response.status === 401 && !isAuthEndpoint) {
+      const newToken = await this.onUnauthorized();
+      if (newToken !== null) {
+        response = await this.attempt(method, path, body, init, isAuthEndpoint);
+      }
+    }
+
+    return this.handleResponse<T>(response);
+  }
+
+  private async attempt(
+    method: string,
+    path: string,
+    body: unknown,
+    init: Omit<RequestInit, "method" | "body"> | undefined,
+    isAuthEndpoint: boolean,
+  ): Promise<Response> {
     const url = this.baseUrl + path;
     const headers: Record<string, string> = {
       Accept: "application/json",
-      ...this.getAuthHeaders(),
       ...((init?.headers as Record<string, string> | undefined) ?? {}),
     };
+    if (!isAuthEndpoint) {
+      const token = this.getAccessToken();
+      if (token !== null) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+    }
     let serializedBody: string | undefined;
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
       serializedBody = JSON.stringify(body);
     }
 
-    let response: Response;
     try {
-      response = await this.fetchImpl(url, {
+      return await this.fetchImpl(url, {
         ...init,
         method,
         headers,
         body: serializedBody,
+        // Required for the refresh-cookie carry on auth endpoints,
+        // and harmless on non-auth same-origin requests. Same-origin
+        // per A10.
+        credentials: "include",
       });
     } catch (e) {
       // Network unreachable, DNS failure, request aborted, etc.
@@ -120,16 +154,15 @@ export class BrokerClient {
           : `network error: ${String(e)}`;
       throw BrokerError.transport(message);
     }
+  }
 
+  private async handleResponse<T>(response: Response): Promise<T> {
     // 204 No Content — no body. T must be void/undefined for callers
     // that expect this; we return undefined cast to T.
     if (response.status === 204) {
       return undefined as T;
     }
 
-    // Try to parse the body as JSON. If parsing fails on a 2xx, that's
-    // a broker bug — surface it as INTERNAL_ERROR. If parsing fails on
-    // a non-2xx, fall through to the no-envelope error path below.
     let parsed: APIResponse<T> | unknown;
     let parseFailed = false;
     try {
@@ -141,13 +174,11 @@ export class BrokerClient {
     if (response.ok && !parseFailed) {
       const env = parsed as APIResponse<T>;
       if (env.error !== null) {
-        // 2xx with `error != null` — the broker is misbehaving.
-        // Treat it as INTERNAL_ERROR rather than silently returning
-        // `null`-as-T. This protects pages from surprise null payloads.
         throw new BrokerError({
           httpStatus: response.status,
           code: env.error.code ?? "INTERNAL_ERROR",
-          message: env.error.message ?? "broker returned 2xx with error envelope",
+          message:
+            env.error.message ?? "broker returned 2xx with error envelope",
           envelope: env.error,
         });
       }
@@ -163,9 +194,12 @@ export class BrokerClient {
       });
     }
 
-    // Non-2xx path — preferred shape is our envelope, but tolerate
-    // anything (e.g. an upstream proxy returning HTML for a 502).
-    if (!parseFailed && parsed && typeof parsed === "object" && "error" in parsed) {
+    if (
+      !parseFailed &&
+      parsed &&
+      typeof parsed === "object" &&
+      "error" in parsed
+    ) {
       const errEnv = (parsed as APIResponse<unknown>).error;
       if (errEnv !== null) {
         throw new BrokerError({
@@ -176,7 +210,6 @@ export class BrokerClient {
         });
       }
     }
-    // Fallback: no envelope, or a corrupt one.
     throw new BrokerError({
       httpStatus: response.status,
       code: response.status >= 500 ? "INTERNAL_ERROR" : "ERROR",
@@ -189,10 +222,9 @@ export class BrokerClient {
 // ── React context binding ──────────────────────────────────────
 
 /**
- * Context for the live `BrokerClient` instance. M3-03's
- * `BrokerClientProvider` constructs the instance (with the auth
- * callback wired in) and provides it; pages and queries read it via
- * `useBrokerClient()`.
+ * Context for the live `BrokerClient` instance. `BrokerClientProvider`
+ * constructs the instance (with auth callbacks wired in) and provides
+ * it; pages and queries read it via `useBrokerClient()`.
  *
  * The default value is `null` so a `useBrokerClient()` outside a
  * provider throws — early loud failure beats silent surprise.
@@ -204,7 +236,7 @@ export function useBrokerClient(): BrokerClient {
   if (client === null) {
     throw new Error(
       "useBrokerClient called outside a <BrokerClientProvider>. " +
-        "M3-03 should have mounted the provider above this component.",
+        "main.tsx mounts the provider above this component.",
     );
   }
   return client;

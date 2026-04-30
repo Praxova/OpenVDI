@@ -24,12 +24,14 @@ const NAV_LINKS = [
  * `/me/desktops` cached results before the fresh fetch lands.
  */
 export function AppShell() {
-  const { currentUser, logout } = useAuth();
+  const { state, logout } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const user = state.status === "authenticated" ? state.user : null;
+
   const handleLogout = () => {
-    logout();
+    void logout();
     queryClient.clear();
     navigate("/login", { replace: true });
   };
@@ -73,7 +75,7 @@ export function AppShell() {
 
         <div className="flex items-center gap-2">
           <span className="text-body-sm text-text-secondary mr-2">
-            {currentUser?.username}
+            {user?.username ?? ""}
           </span>
           <ThemeToggle />
           <button

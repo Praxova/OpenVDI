@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "./AuthContext";
+import { InitializingScreen } from "@/components/InitializingScreen";
 
 /**
  * Layout-route wrapper. Used as `element={<ProtectedRoute />}` on a
@@ -8,19 +9,22 @@ import { useAuth } from "./AuthContext";
  * `<Outlet />`. The AppShell is a child route element, so it inherits
  * the auth gate without each page having to check.
  *
- * On redirect we pass the current pathname in `state.from` so the
- * login page can bounce back after a successful login. `replace`
- * rewrites the history entry instead of pushing — clicking Back from
- * the login screen should not return the user to the protected URL
- * they were just bounced from.
+ * Three branches per AuthState:
+ *   initializing   — render the InitializingScreen until refresh resolves.
+ *   unauthenticated — bounce to /login, capturing pathname for post-login redirect.
+ *   authenticated  — render the child outlet.
  */
 export function ProtectedRoute() {
-  const { currentUser } = useAuth();
+  const { state } = useAuth();
   const location = useLocation();
 
-  if (currentUser === null) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (state.status === "initializing") {
+    return <InitializingScreen />;
   }
-
+  if (state.status === "unauthenticated") {
+    return (
+      <Navigate to="/login" replace state={{ from: location.pathname }} />
+    );
+  }
   return <Outlet />;
 }
