@@ -223,14 +223,10 @@ Interface methodProxmox API`create_snapshot(ref, name, description, include_ram)
 #   pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/get-osinfo", "GET")
 #   pve_get_endpoint_detail(
 #       "/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces", "GET")
+#   pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec", "POST")
+#   pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec-status", "GET")
 ```
 
-# pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec", "POST")
-
-# pve_get_endpoint_detail("/nodes/{node}/qemu/{vmid}/agent/exec-status", "GET")
-
-```
-```
 **`agent_ping(ref) -> bool`** — `POST /nodes/{node}/qemu/{vmid}/agent/ping`. Proxmox returns HTTP 500 when the guest agent is unreachable; the provider catches this specific shape and returns `False`. Other errors (404, 500 from actual server problems) raise normally.
 
 **`agent_get_users(ref) -> list[GuestUser]`** — `GET /nodes/{node}/qemu/{vmid}/agent/get-users`.
@@ -244,9 +240,9 @@ Field mapping per user:
 
 **`agent_get_network(ref) -> list[NetworkInterface]`** — `GET /nodes/{node}/qemu/{vmid}/agent/network-get-interfaces`. Flattens the nested Proxmox structure into the shared `NetworkInterface` shape.
 
-**`agent_exec(ref, command, input_data) -> int`** — `POST /nodes/{node}/qemu/{vmid}/agent/exec`. The Proxmox API expects `command` in `string-alist` format; the provider takes a Python `list[str]` and serializes appropriately. `input_data` → `input-data` (translated). Returns PID.
+**`agent_exec(ref, command, input_data) -> int`** — `POST /nodes/{node}/qemu/{vmid}/agent/exec`. The Proxmox API expects `command` in `string-alist` format; the provider takes a Python `list[str]` and serializes appropriately. `input_data` → `input-data` (translated) and is base64-encoded by the provider before transmission per the QGA protocol. Returns PID.
 
-**`agent_exec_status(ref, pid) -> ExecStatus`** — `GET /nodes/{node}/qemu/{vmid}/agent/exec-status`. Maps Proxmox `exited`, `exitcode`, `out-data`, `err-data` to the shared `ExecStatus` shape.
+**`agent_exec_status(ref, pid) -> ExecStatus`** — `GET /nodes/{node}/qemu/{vmid}/agent/exec-status`. Maps Proxmox `exited`, `exitcode`, `out-data`, `err-data` to the shared `ExecStatus` shape; `out-data` / `err-data` are base64-decoded with `errors="replace"` so binary stdout doesn't crash the broker. Proxmox's `out-truncated` / `err-truncated` flags are NOT surfaced via `ExecStatus` at v0.
 
 ### Console Tickets
 

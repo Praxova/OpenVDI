@@ -10,6 +10,7 @@ delete). Remaining guest agent methods arrive in later prompts.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 from typing import ClassVar
@@ -20,10 +21,13 @@ from app.providers.base import (
     CloneRequest,
     ConsoleKind,
     ConsoleTicket,
+    ExecStatus,
     GuestUser,
+    NetworkInterface,
     NodeInfo,
     NodeStatus,
     NoVNCTicket,
+    OSInfo,
     PowerState,
     ProviderCapabilities,
     SnapshotInfo,
@@ -238,6 +242,20 @@ class ProxmoxProvider:
             "POST",
             f"/nodes/{node}/qemu/{vmid}/status/shutdown",
             data=body,
+        )
+        return make_task_handle(node, upid)
+
+    async def reboot_vm(self, ref: VMRef) -> TaskHandle:
+        """Reboot a running VM via /status/reboot.
+
+        Proxmox shuts the guest down (ACPI) and restarts it; pending
+        config changes apply on the next boot. The Protocol's reboot_vm
+        has no `force` parameter, so we don't expose Proxmox's optional
+        `timeout` knob — the server default applies.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        upid = await self._client._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/status/reboot",
         )
         return make_task_handle(node, upid)
 
@@ -486,6 +504,166 @@ class ProxmoxProvider:
             )
         return out
 
+    async def agent_get_osinfo(self, ref: VMRef) -> OSInfo:
+        """Fetch OS info from the QEMU guest agent (GET /agent/get-osinfo).
+
+        Proxmox returns the QGA payload verbatim under "result" with
+        kebab-case keys. Mapping to the Protocol's OSInfo:
+          name           ← name (or pretty-name fallback)
+          version        ← version-id (or version fallback)
+          kernel_release ← kernel-release
+          architecture   ← machine
+
+        Raises ProviderError subclasses on agent unreachable. Callers
+        should agent_ping first if they need a liveness gate.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        resp = await self._client._request(
+            "GET", f"/nodes/{node}/qemu/{vmid}/agent/get-osinfo",
+        )
+        result = (
+            resp.get("result", {}) if isinstance(resp, dict) else {}
+        )
+        if not isinstance(result, dict):
+            result = {}
+        return OSInfo(
+            name=result.get("name") or result.get("pretty-name", ""),
+            version=(
+                result.get("version-id") or result.get("version", "")
+            ),
+            kernel_release=result.get("kernel-release"),
+            architecture=result.get("machine"),
+        )
+
+    async def agent_get_network(
+        self, ref: VMRef,
+    ) -> list[NetworkInterface]:
+        """Fetch in-VM network interfaces from the guest agent
+        (GET /agent/network-get-interfaces).
+
+        Proxmox returns interfaces with kebab-case keys
+        (`hardware-address`, `ip-addresses`, `ip-address`,
+        `ip-address-type`). Flatten to the Protocol's NetworkInterface:
+        names verbatim, MAC lowercased, IPs collected as plain strings,
+        and `is_up` derived heuristically as "has at least one
+        non-loopback, non-link-local IP." The QGA does not expose a
+        true admin/operstate field via this endpoint.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        resp = await self._client._request(
+            "GET",
+            f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces",
+        )
+        interfaces_raw = (
+            resp.get("result", []) if isinstance(resp, dict) else []
+        )
+        if not isinstance(interfaces_raw, list):
+            interfaces_raw = []
+
+        interfaces: list[NetworkInterface] = []
+        for raw in interfaces_raw:
+            if not isinstance(raw, dict):
+                continue
+            ips: list[str] = []
+            has_non_loopback = False
+            for ip_entry in raw.get("ip-addresses") or []:
+                if not isinstance(ip_entry, dict):
+                    continue
+                addr = ip_entry.get("ip-address")
+                if not addr:
+                    continue
+                ips.append(addr)
+                # is_up heuristic: any IP that's not loopback or
+                # link-local autoconf signals the interface is
+                # genuinely operational.
+                if (
+                    addr not in ("127.0.0.1", "::1")
+                    and not addr.startswith("169.254.")
+                    and not addr.lower().startswith("fe80:")
+                ):
+                    has_non_loopback = True
+
+            mac = (raw.get("hardware-address") or "").lower() or None
+            interfaces.append(NetworkInterface(
+                name=raw.get("name", ""),
+                mac_address=mac,
+                ip_addresses=ips,
+                is_up=has_non_loopback,
+            ))
+        return interfaces
+
+    async def agent_exec(
+        self,
+        ref: VMRef,
+        command: list[str],
+        input_data: str | None = None,
+    ) -> int:
+        """Execute `command` in the guest. Returns the agent-assigned
+        PID, to be polled via agent_exec_status.
+
+        The Proxmox `command` parameter is a `string-alist` — sent on
+        the wire as repeated `command=<arg>` form fields, which httpx
+        produces from a list value. `input-data` is base64-encoded by
+        the caller per the QGA protocol; the agent decodes server-side
+        and pipes it to the command's stdin. The kebab-case key is
+        applied by params.py's PARAM_MAP.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        body: dict[str, object] = {"command": list(command)}
+        if input_data is not None:
+            body["input_data"] = base64.b64encode(
+                input_data.encode("utf-8"),
+            ).decode("ascii")
+
+        resp = await self._client._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/agent/exec", data=body,
+        )
+        if not isinstance(resp, dict) or "pid" not in resp:
+            raise ProviderError(
+                f"agent/exec returned unexpected payload: {resp!r}",
+                provider_type="proxmox",
+            )
+        return int(resp["pid"])
+
+    async def agent_exec_status(
+        self, ref: VMRef, pid: int,
+    ) -> ExecStatus:
+        """Fetch the status + captured output of an agent_exec command
+        (GET /agent/exec-status?pid=...).
+
+        Per Proxmox's contract:
+          - `exited` is a bool — directly map.
+          - `exitcode` is present only when exited; map to int or None.
+          - `out-data` / `err-data` are base64-encoded by the QGA;
+            decode to UTF-8 with errors="replace" so binary stdout
+            (e.g. a tool that writes raw bytes) doesn't crash the
+            broker. Missing fields → empty string.
+          - `out-truncated` / `err-truncated` flags are NOT surfaced
+            in the Protocol's ExecStatus; truncation is silent at v0.
+            M5+ may add fields if real users need them.
+        """
+        node, vmid = unpack_vm_ref(ref)
+        resp = await self._client._request(
+            "GET",
+            f"/nodes/{node}/qemu/{vmid}/agent/exec-status",
+            params={"pid": pid},
+        )
+        if not isinstance(resp, dict):
+            resp = {}
+
+        exited = bool(resp.get("exited", False))
+        exit_code: int | None = None
+        if exited:
+            ec_raw = resp.get("exitcode")
+            exit_code = int(ec_raw) if ec_raw is not None else None
+
+        return ExecStatus(
+            exited=exited,
+            exit_code=exit_code,
+            stdout=_decode_b64(resp.get("out-data")),
+            stderr=_decode_b64(resp.get("err-data")),
+        )
+
     # ── Console tickets ───────────────────────────────────────
 
     async def get_console_ticket(
@@ -622,6 +800,22 @@ class ProxmoxProvider:
 
 
 # ── Response mappers ──────────────────────────────────────────
+
+def _decode_b64(value: object) -> str:
+    """Decode the agent's base64-encoded stdout/stderr field.
+
+    Returns empty string on missing or undecodable input. Uses
+    errors="replace" because a binary tool that writes to stdout
+    (e.g. `cat /dev/urandom | head -c 100`) produces non-UTF-8 bytes;
+    surfacing the lossy display beats crashing the broker.
+    """
+    if not value or not isinstance(value, str):
+        return ""
+    try:
+        return base64.b64decode(value).decode("utf-8", errors="replace")
+    except (ValueError, TypeError):
+        return ""
+
 
 def _node_info_from_dict(d: dict) -> NodeInfo:
     name = d.get("node", "")
