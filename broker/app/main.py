@@ -69,7 +69,6 @@ from app.services.jwt_service import JWTService
 from app.services.ldap_service import LDAPService
 from app.services.provisioner import PoolInactive
 from app.services.session_tracker import InvalidSessionStateError
-from app.services.task_tracker import resume_inflight_tasks
 from app.services.vmid_allocator import VMIDRangeConflict, VMIDRangeExhausted
 from app.workers import WORKERS, WorkerRunner
 
@@ -257,10 +256,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.ping_tasks.add(task)
         task.add_done_callback(app.state.ping_tasks.discard)
 
-    # Resume any desktop tasks that were in-flight when the broker
-    # last stopped. See app.services.task_tracker.resume_inflight_tasks.
-    app.state.task_tracker_tasks: set[asyncio.Task] = set()
-    await resume_inflight_tasks(app)
+    # In-flight task discovery is the task_tracker worker's job (M4-10).
+    # Its first tick (≤5s after lifespan) finds every Desktop row with
+    # pve_task_upid set and drives polling, regardless of which broker
+    # set the UPID. The M2 BackgroundTasks-based resume hook is gone.
 
     # ── Workers framework (M4-07) ────────────────────────────
     # Each worker self-elects a leader via pg_try_advisory_lock; this
@@ -273,10 +272,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info(
         "OpenVDI broker ready: %d provider(s), %d ping task(s), "
-        "%d resumed task(s), %d worker(s)",
+        "%d worker(s)",
         len(app.state.providers),
         len(app.state.ping_tasks),
-        len(app.state.task_tracker_tasks),
         len(WORKERS),
     )
 
@@ -287,11 +285,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Stop workers FIRST — they hold lock-holder connections from
         # the engine pool that need to release before dispose_engine().
         await app.state.worker_runner.stop()
-        # Drain in-flight pings + task-tracker pollers. return_exceptions=True
-        # so a failed task doesn't mask a second error during cleanup.
-        all_tasks = list(app.state.ping_tasks) + list(
-            app.state.task_tracker_tasks
-        )
+        # Drain in-flight cluster ping tasks. return_exceptions=True so
+        # a failed task doesn't mask a second error during cleanup.
+        all_tasks = list(app.state.ping_tasks)
         if all_tasks:
             await asyncio.gather(*all_tasks, return_exceptions=True)
         for cid, provider in app.state.providers.items():

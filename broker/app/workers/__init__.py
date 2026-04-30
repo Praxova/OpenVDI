@@ -19,6 +19,7 @@ from app.workers.base import Worker, WorkerRunner
 from app.workers.echo import EchoWorker
 from app.workers.pool_provisioner import PoolProvisionerWorker
 from app.workers.session_monitor import SessionMonitorWorker
+from app.workers.task_tracker import TaskTrackerWorker
 
 # Workers spawned at lifespan startup. Order doesn't matter — each
 # is its own asyncio task with its own leader lock; in a multi-broker
@@ -28,6 +29,7 @@ from app.workers.session_monitor import SessionMonitorWorker
 WORKERS: list[type[Worker]] = [
     SessionMonitorWorker,
     PoolProvisionerWorker,
+    TaskTrackerWorker,
 ]
 
 __all__ = [
@@ -37,4 +39,5 @@ __all__ = [
     "EchoWorker",
     "PoolProvisionerWorker",
     "SessionMonitorWorker",
+    "TaskTrackerWorker",
 ]

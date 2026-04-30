@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -39,7 +39,7 @@ from app.schemas import (
     TaskAccepted,
 )
 from app.services.audit_service import log_business_event
-from app.services.task_tracker import DesktopTaskKind, start_desktop_task
+from app.services.task_tracker import DesktopTaskKind, record_desktop_task
 
 
 logger = logging.getLogger(__name__)
@@ -345,7 +345,6 @@ async def desktop_power(
     desktop_id: UUID,
     action: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[TaskAccepted]:
     if action not in _POWER_ACTION_TO_KIND:
@@ -404,17 +403,17 @@ async def desktop_power(
         handle = await provider.reboot_vm(ref)
 
     kind = _POWER_ACTION_TO_KIND[action]
-    await start_desktop_task(
+    await record_desktop_task(
         session=session,
         desktop=desktop,
         kind=kind,
         task_handle=handle,
-        background_tasks=background_tasks,
     )
-    # CRITICAL: commit before returning — start_desktop_task writes the
-    # UPID to the row and schedules the poller, which runs after the
-    # response. Pre-commit, the poller opens its own session and can't
-    # see the UPID.
+    # CRITICAL: commit before returning. The task_tracker worker reads
+    # from a fresh session and won't see uncommitted writes; without
+    # the commit, the worker's first tick after this response misses
+    # the UPID and the desktop sits indefinitely with the task in
+    # flight on Proxmox but no completion handler watching.
     await session.commit()
 
     return APIResponse(
@@ -440,7 +439,6 @@ async def desktop_power(
 async def rebuild_desktop(
     desktop_id: UUID,
     request: Request,
-    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[TaskAccepted]:
     desktop = await session.get(
@@ -502,12 +500,11 @@ async def rebuild_desktop(
     destroy_handle = await provider.destroy_vm(ref)
 
     desktop.status = DesktopStatus.DELETING
-    await start_desktop_task(
+    await record_desktop_task(
         session=session,
         desktop=desktop,
         kind=DesktopTaskKind.REBUILD,
         task_handle=destroy_handle,
-        background_tasks=background_tasks,
     )
     await session.commit()
 
@@ -534,7 +531,6 @@ async def rebuild_desktop(
 async def destroy_desktop(
     desktop_id: UUID,
     request: Request,
-    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[TaskAccepted]:
     desktop = await session.get(
@@ -593,12 +589,11 @@ async def destroy_desktop(
     destroy_handle = await provider.destroy_vm(ref)
 
     desktop.status = DesktopStatus.DELETING
-    await start_desktop_task(
+    await record_desktop_task(
         session=session,
         desktop=desktop,
         kind=DesktopTaskKind.DESTROY,
         task_handle=destroy_handle,
-        background_tasks=background_tasks,
     )
     await session.commit()
 

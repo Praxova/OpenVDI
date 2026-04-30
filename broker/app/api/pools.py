@@ -11,11 +11,13 @@ Patterns established in M2-14 apply:
 - 404/400/409 via HTTPException with a `code`/`message` detail dict.
 - 422 happens automatically from Pydantic validation.
 
-Caller-commits-before-202 (M2-13) is the rule for async handlers: the
-DB must reflect the task's UPID before FastAPI runs BackgroundTasks,
-otherwise the worker reads pre-commit state. Every async endpoint here
-either commits explicitly or calls `start_desktop_task` which expects
-the caller to commit.
+Caller-commits-before-202 is the rule for async handlers (M2-13 +
+M4-10): the DB must reflect the task's UPID before the response
+returns, otherwise the task_tracker worker reads pre-commit state on
+its next tick. The two pool endpoints here use BackgroundTasks for
+multi-step fan-out (provision N desktops, destroy a pool's worth of
+desktops); per-desktop UPID-tracked endpoints in api/desktops.py use
+the M4-10 record_desktop_task path instead.
 """
 from __future__ import annotations
 
