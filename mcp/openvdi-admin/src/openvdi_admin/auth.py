@@ -25,8 +25,16 @@ from typing import Final
 
 import httpx
 
+from openvdi_admin._request_context import current_request_id
 from openvdi_admin.config import Settings
 from openvdi_admin.errors import BrokerError
+
+
+def _request_id_headers() -> dict[str, str]:
+    """Build the optional X-Request-ID header dict. Returns empty
+    when called outside an instrumented tool body (e.g. tests)."""
+    rid = current_request_id()
+    return {"X-Request-ID": rid} if rid is not None else {}
 
 
 logger = logging.getLogger(__name__)
@@ -113,6 +121,7 @@ class BrokerAuthClient:
                         self._settings.openvdi_service_password.get_secret_value()
                     ),
                 },
+                headers=_request_id_headers() or None,
             )
         except httpx.RequestError as exc:
             raise BrokerError.transport(
@@ -153,7 +162,10 @@ class BrokerAuthClient:
         """POST /auth/refresh. The cookie jar carries the refresh token
         automatically. Stores new access token."""
         try:
-            response = await self._http.post(_REFRESH_PATH)
+            response = await self._http.post(
+                _REFRESH_PATH,
+                headers=_request_id_headers() or None,
+            )
         except httpx.RequestError as exc:
             raise BrokerError.transport(
                 f"refresh request failed: {exc}"

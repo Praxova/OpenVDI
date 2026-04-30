@@ -24,7 +24,7 @@ from typing import Any
 
 from openvdi_admin.errors import BrokerError
 from openvdi_admin.intent._result import StepTracker
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import require_writable
 from openvdi_admin.tools.clusters import (
     openvdi_delete_cluster,
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 _FORBIDDEN_PREFIXES = frozenset({"", "*"})
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_reset_test_environment(
     name_prefix: str = "test-",
     keep_clusters: bool = True,

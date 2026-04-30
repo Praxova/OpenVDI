@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import (
     dry_run_envelope,
     get_broker_client,
@@ -36,7 +36,7 @@ _PROVISION_TIMEOUT_SECONDS = 300
 _DRAIN_TIMEOUT_SECONDS = 600
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_list_pools(
     cluster_id: str | None = None,
     template_id: str | None = None,
@@ -69,7 +69,7 @@ async def openvdi_list_pools(
     return await client.get("/api/v1/pools", params=params)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_pool(pool_id: str) -> dict[str, Any]:
     """Get full details for a single pool — metadata, capacity
     counts, and the list of desktops in the pool.
@@ -81,7 +81,7 @@ async def openvdi_get_pool(pool_id: str) -> dict[str, Any]:
     return await client.get(f"/api/v1/pools/{pool_id}")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_pool_summary(pool_id: str) -> dict[str, Any]:
     """Compact pool health summary. Synthesizes a flat snapshot from
     the full pool record so agents asking 'is this pool healthy?'
@@ -141,7 +141,7 @@ async def openvdi_get_pool_summary(pool_id: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_create_pool(
     name: str,
     display_name: str,
@@ -227,7 +227,7 @@ async def openvdi_create_pool(
     return await client.post("/api/v1/pools", body=body)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_update_pool(
     pool_id: str,
     display_name: str | None = None,
@@ -281,7 +281,7 @@ async def openvdi_update_pool(
     return await client.put(f"/api/v1/pools/{pool_id}", body=body)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_delete_pool(
     pool_id: str,
     confirm: bool = False,
@@ -338,7 +338,7 @@ async def openvdi_delete_pool(
     return await client.delete(f"/api/v1/pools/{pool_id}")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_provision_pool(
     pool_id: str,
     count: int,
@@ -388,7 +388,7 @@ async def openvdi_provision_pool(
     )
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_drain_pool(
     pool_id: str,
     confirm: bool = False,

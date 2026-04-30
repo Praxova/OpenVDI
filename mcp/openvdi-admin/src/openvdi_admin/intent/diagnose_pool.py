@@ -16,7 +16,7 @@ from typing import Any
 
 from openvdi_admin.errors import BrokerError
 from openvdi_admin.intent._result import StepTracker
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools.audit import openvdi_query_audit
 from openvdi_admin.tools.clusters import openvdi_get_cluster
 from openvdi_admin.tools.desktops import openvdi_list_desktops
@@ -37,7 +37,7 @@ _AUDIT_WINDOW_HOURS = 1
 _AUDIT_LIMIT = 50
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_diagnose_pool(pool_id: str) -> dict[str, Any]:
     """Comprehensive health snapshot for a single pool.
 

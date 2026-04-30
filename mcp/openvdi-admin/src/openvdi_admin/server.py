@@ -20,6 +20,7 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
+from openvdi_admin._mcp_instance import mcp
 from openvdi_admin.auth import BrokerAuthClient
 from openvdi_admin.client import BrokerClient
 from openvdi_admin.config import Settings, get_settings
@@ -29,9 +30,10 @@ from openvdi_admin.logging import configure_logging
 logger = logging.getLogger(__name__)
 
 
-# Module-level FastMCP singleton. Tools register via @mcp.tool()
-# decorators in tools/<resource>.py modules.
-mcp = FastMCP("openvdi-admin")
+# Re-export `mcp` so existing `from openvdi_admin.server import mcp`
+# imports keep working. The actual singleton lives in
+# `_mcp_instance.py` to avoid a circular import through
+# `_tool_wrapper.register_tool`.
 
 
 # Module-level broker client singletons populated by build_server().

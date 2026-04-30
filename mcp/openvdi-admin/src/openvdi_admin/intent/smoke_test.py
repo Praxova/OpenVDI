@@ -12,7 +12,7 @@ from typing import Any
 
 from openvdi_admin.errors import BrokerError
 from openvdi_admin.intent._result import StepTracker
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import require_writable
 from openvdi_admin.tools.desktops import (
     openvdi_delete_desktop,
@@ -29,7 +29,7 @@ from openvdi_admin.tools.pools import (
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_smoke_test(
     pool_id: str,
     provision_if_empty: bool = True,

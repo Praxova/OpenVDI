@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import (
     dry_run_envelope,
     get_broker_client,
@@ -15,7 +15,7 @@ from openvdi_admin.tools._common import (
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_list_clusters() -> list[dict[str, Any]]:
     """List all registered hypervisor clusters.
 
@@ -31,7 +31,7 @@ async def openvdi_list_clusters() -> list[dict[str, Any]]:
     return await client.get("/api/v1/clusters")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_cluster(cluster_id: str) -> dict[str, Any]:
     """Get full details for a single cluster, including live node
     status pulled from the cluster's Proxmox API at request time.
@@ -48,7 +48,7 @@ async def openvdi_get_cluster(cluster_id: str) -> dict[str, Any]:
     return await client.get(f"/api/v1/clusters/{cluster_id}")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_create_cluster(
     name: str,
     api_url: str,
@@ -96,7 +96,7 @@ async def openvdi_create_cluster(
     return await client.post("/api/v1/clusters", body=body)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_update_cluster(
     cluster_id: str,
     name: str | None = None,
@@ -150,7 +150,7 @@ async def openvdi_update_cluster(
     return await client.put(f"/api/v1/clusters/{cluster_id}", body=body)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_delete_cluster(
     cluster_id: str,
     confirm: bool = False,

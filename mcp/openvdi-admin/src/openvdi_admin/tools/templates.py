@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import (
     dry_run_envelope,
     get_broker_client,
@@ -15,7 +15,7 @@ from openvdi_admin.tools._common import (
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_list_templates(
     cluster_id: str | None = None,
     os_type: str | None = None,
@@ -44,7 +44,7 @@ async def openvdi_list_templates(
     return await client.get("/api/v1/templates", params=params)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_template(template_id: str) -> dict[str, Any]:
     """Get full details for a single template.
 
@@ -55,7 +55,7 @@ async def openvdi_get_template(template_id: str) -> dict[str, Any]:
     return await client.get(f"/api/v1/templates/{template_id}")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_register_template(
     cluster_id: str,
     name: str,
@@ -111,7 +111,7 @@ async def openvdi_register_template(
     return await client.post("/api/v1/templates", body=body)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_update_template(
     template_id: str,
     name: str | None = None,
@@ -153,7 +153,7 @@ async def openvdi_update_template(
     return await client.put(f"/api/v1/templates/{template_id}", body=body)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_validate_template(template_id: str) -> dict[str, Any]:
     """Re-check the template against Proxmox: confirm it's still a
     template, the QEMU guest agent is configured (`agent: 1` in PVE
@@ -182,7 +182,7 @@ async def openvdi_validate_template(template_id: str) -> dict[str, Any]:
     return await client.post(f"/api/v1/templates/{template_id}/validate")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_retire_template(
     template_id: str,
     confirm: bool = False,

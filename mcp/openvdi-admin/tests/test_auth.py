@@ -215,3 +215,109 @@ class TestLoginFailure:
             assert "missing access_token" in exc.value.message
         finally:
             await client.close()
+
+
+class TestRequestIdHeader:
+    """X-Request-ID propagation on auth endpoints. Login + refresh
+    inherit the request_id from the calling tool's ContextVar so the
+    broker sees one UUID across the full tool invocation."""
+
+    async def test_login_attaches_header_when_set(
+        self, settings, mock_broker,
+    ):
+        from openvdi_admin._request_context import (
+            clear_request_id, new_request_id,
+        )
+
+        clear_request_id()
+        rid = new_request_id()
+        try:
+            route = mock_broker.post("/api/v1/auth/login").respond(
+                json={
+                    "data": {
+                        "access_token": "tok-1",
+                        "expires_in": 900,
+                        "role": "admin",
+                    },
+                    "error": None,
+                },
+            )
+            client = BrokerAuthClient(settings)
+            try:
+                await client.get_token()
+                req = route.calls.last.request
+                assert req.headers.get("x-request-id") == rid
+            finally:
+                await client.close()
+        finally:
+            clear_request_id()
+
+    async def test_login_skips_header_when_unset(
+        self, settings, mock_broker,
+    ):
+        from openvdi_admin._request_context import clear_request_id
+
+        clear_request_id()
+        route = mock_broker.post("/api/v1/auth/login").respond(
+            json={
+                "data": {
+                    "access_token": "tok-1",
+                    "expires_in": 900,
+                    "role": "admin",
+                },
+                "error": None,
+            },
+        )
+        client = BrokerAuthClient(settings)
+        try:
+            await client.get_token()
+            req = route.calls.last.request
+            assert "x-request-id" not in (
+                k.lower() for k in req.headers.keys()
+            )
+        finally:
+            await client.close()
+
+    async def test_refresh_attaches_header(
+        self, settings, mock_broker,
+    ):
+        from openvdi_admin._request_context import (
+            clear_request_id, new_request_id,
+        )
+
+        clear_request_id()
+        # Initial login (no request_id), then refresh (with request_id).
+        mock_broker.post("/api/v1/auth/login").respond(
+            json={
+                "data": {
+                    "access_token": "tok-1",
+                    "expires_in": 900,
+                    "role": "admin",
+                },
+                "error": None,
+            },
+        )
+        refresh_route = mock_broker.post(
+            "/api/v1/auth/refresh",
+        ).respond(
+            json={
+                "data": {
+                    "access_token": "tok-2",
+                    "expires_in": 900,
+                    "role": "admin",
+                },
+                "error": None,
+            },
+        )
+        client = BrokerAuthClient(settings)
+        try:
+            await client.get_token()  # login (no rid)
+            rid = new_request_id()
+            try:
+                await client.force_new_token()
+                req = refresh_route.calls.last.request
+                assert req.headers.get("x-request-id") == rid
+            finally:
+                clear_request_id()
+        finally:
+            await client.close()

@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from openvdi_admin.errors import BrokerError
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import (
     dry_run_envelope,
     get_broker_client,
@@ -41,7 +41,7 @@ _VALID_POWER_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot"})
 # ── Read tools ────────────────────────────────────────────────
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_list_desktops(
     pool_id: str | None = None,
     status: str | None = None,
@@ -71,7 +71,7 @@ async def openvdi_list_desktops(
     return await client.get("/api/v1/desktops", params=params)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_desktop(desktop_id: str) -> dict[str, Any]:
     """Get full details for a single desktop, including the active
     session (if any) and the live power_state opportunistically read
@@ -87,7 +87,7 @@ async def openvdi_get_desktop(desktop_id: str) -> dict[str, Any]:
 # ── Assignment ────────────────────────────────────────────────
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_assign_desktop(
     desktop_id: str,
     username: str,
@@ -168,7 +168,7 @@ async def openvdi_assign_desktop(
     )
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_unassign_desktop(
     desktop_id: str,
     confirm: bool = False,
@@ -223,7 +223,7 @@ async def openvdi_unassign_desktop(
 # ── Lifecycle ─────────────────────────────────────────────────
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_rebuild_desktop(
     desktop_id: str,
     confirm: bool = False,
@@ -300,7 +300,7 @@ async def openvdi_rebuild_desktop(
     )
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_power_desktop(
     desktop_id: str,
     action: str,
@@ -390,7 +390,7 @@ async def openvdi_power_desktop(
     )
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_delete_desktop(
     desktop_id: str,
     confirm: bool = False,

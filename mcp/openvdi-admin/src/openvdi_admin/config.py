@@ -63,6 +63,15 @@ class Settings(BaseSettings):
             "Python logging level. Standard names: DEBUG, INFO, WARNING, ERROR."
         ),
     )
+    openvdi_mcp_log_tool_starts: bool = Field(
+        default=False,
+        description=(
+            "If True, emit a 'tool started' log line in addition to "
+            "the 'tool completed' line. Doubles log volume. Useful "
+            "when debugging hangs (start log proves the tool entered "
+            "at all). Default False."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

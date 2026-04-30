@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import get_broker_client
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_query_audit(
     actor: str | None = None,
     action: str | None = None,

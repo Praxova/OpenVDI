@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import (
     dry_run_envelope,
     get_broker_client,
@@ -22,7 +22,7 @@ from openvdi_admin.tools._common import (
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_list_sessions(
     pool_id: str | None = None,
     desktop_id: str | None = None,
@@ -54,7 +54,7 @@ async def openvdi_list_sessions(
     return await client.get("/api/v1/sessions", params=params)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_session(session_id: str) -> dict[str, Any]:
     """Get full session details, including guest-agent telemetry
     (os_user, os_info, vm_ip_address, last_heartbeat, idle_since)
@@ -70,7 +70,7 @@ async def openvdi_get_session(session_id: str) -> dict[str, Any]:
     return await client.get(f"/api/v1/sessions/{session_id}")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_force_disconnect_session(
     session_id: str,
     confirm: bool = False,

@@ -371,3 +371,75 @@ class TestTransportFailures:
             assert exc.value.http_status == 0
         finally:
             await client.close()
+
+
+class TestRequestIdHeader:
+    """X-Request-ID propagation — set on the ContextVar, BrokerClient
+    attaches the header. Outside an instrumented tool body the header
+    is absent."""
+
+    async def test_attaches_header_when_context_var_is_set(
+        self, settings, mock_broker, auth_logged_in,
+    ):
+        from openvdi_admin._request_context import (
+            clear_request_id, new_request_id,
+        )
+
+        clear_request_id()
+        rid = new_request_id()
+        try:
+            route = mock_broker.get("/api/v1/clusters").respond(
+                json={"data": [], "error": None},
+            )
+            client = BrokerClient(auth_logged_in, settings)
+            try:
+                await client.get("/api/v1/clusters")
+                req = route.calls.last.request
+                assert req.headers.get("x-request-id") == rid
+            finally:
+                await client.close()
+        finally:
+            clear_request_id()
+
+    async def test_skips_header_when_context_var_unset(
+        self, settings, mock_broker, auth_logged_in,
+    ):
+        from openvdi_admin._request_context import clear_request_id
+
+        clear_request_id()
+        route = mock_broker.get("/api/v1/clusters").respond(
+            json={"data": [], "error": None},
+        )
+        client = BrokerClient(auth_logged_in, settings)
+        try:
+            await client.get("/api/v1/clusters")
+            req = route.calls.last.request
+            # Outside an instrumented tool — no header sent.
+            assert "x-request-id" not in (
+                k.lower() for k in req.headers.keys()
+            )
+        finally:
+            await client.close()
+
+    async def test_get_raw_attaches_header(
+        self, settings, mock_broker, auth_logged_in,
+    ):
+        from openvdi_admin._request_context import (
+            clear_request_id, new_request_id,
+        )
+
+        clear_request_id()
+        rid = new_request_id()
+        try:
+            route = mock_broker.get("/health").respond(
+                json={"status": "ok"},
+            )
+            client = BrokerClient(auth_logged_in, settings)
+            try:
+                await client.get_raw("/health")
+                req = route.calls.last.request
+                assert req.headers.get("x-request-id") == rid
+            finally:
+                await client.close()
+        finally:
+            clear_request_id()

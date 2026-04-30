@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from openvdi_admin.errors import BrokerError
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import (
     dry_run_envelope,
     get_broker_client,
@@ -16,7 +16,7 @@ from openvdi_admin.tools._common import (
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_list_entitlements(
     pool_id: str,
     principal_type: str | None = None,
@@ -37,7 +37,7 @@ async def openvdi_list_entitlements(
     )
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_grant_entitlement(
     pool_id: str,
     principal_type: str,
@@ -74,7 +74,7 @@ async def openvdi_grant_entitlement(
     )
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_revoke_entitlement(
     pool_id: str,
     entitlement_id: str,

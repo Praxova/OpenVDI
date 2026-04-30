@@ -16,7 +16,7 @@ from typing import Any
 
 from openvdi_admin.errors import BrokerError
 from openvdi_admin.intent._result import StepTracker
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import require_writable
 from openvdi_admin.tools.entitlements import openvdi_grant_entitlement
 from openvdi_admin.tools.pools import (
@@ -29,7 +29,7 @@ from openvdi_admin.tools.templates import openvdi_get_template
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_deploy_pool(
     template_id: str,
     pool_name: str,

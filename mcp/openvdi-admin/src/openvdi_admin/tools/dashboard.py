@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import get_broker_client
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_dashboard_summary() -> dict[str, Any]:
     """Aggregate deployment stats: cluster / pool / desktop /
     session totals plus capacity utilization across the broker.
@@ -24,7 +24,7 @@ async def openvdi_get_dashboard_summary() -> dict[str, Any]:
     return await client.get("/api/v1/dashboard/summary")
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_get_dashboard_capacity() -> list[dict[str, Any]]:
     """Per-pool capacity breakdown: total / available / assigned /
     connected / provisioning / error counts plus VMID-range math

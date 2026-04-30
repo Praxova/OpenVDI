@@ -18,7 +18,7 @@ from typing import Any
 
 from openvdi_admin.errors import BrokerError
 from openvdi_admin.intent._result import StepTracker
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools.entitlements import openvdi_list_entitlements
 from openvdi_admin.tools.pools import openvdi_get_pool, openvdi_list_pools
 from openvdi_admin.tools.user_diagnostics import (
@@ -30,7 +30,7 @@ from openvdi_admin.tools.user_diagnostics import (
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_diagnose_user(username: str) -> dict[str, Any]:
     """Comprehensive single-round-trip diagnostic for a user.
 

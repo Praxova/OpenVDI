@@ -16,6 +16,7 @@ from typing import Any
 
 import httpx
 
+from openvdi_admin._request_context import current_request_id
 from openvdi_admin.auth import BrokerAuthClient
 from openvdi_admin.config import Settings
 from openvdi_admin.errors import BrokerError, unwrap_envelope
@@ -139,6 +140,12 @@ class BrokerClient:
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
         }
+        # Propagate the current tool's request_id (M5-08). Outside
+        # an instrumented tool body — e.g. tests calling the client
+        # directly — the ContextVar is None and we skip the header.
+        rid = current_request_id()
+        if rid is not None:
+            headers["X-Request-ID"] = rid
         try:
             return await self._http.request(
                 method,

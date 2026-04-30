@@ -26,7 +26,7 @@ from typing import Any
 
 from openvdi_admin.errors import BrokerError
 from openvdi_admin.intent._result import StepTracker
-from openvdi_admin.server import mcp
+from openvdi_admin._tool_wrapper import register_tool
 from openvdi_admin.tools._common import get_broker_client
 from openvdi_admin.tools.clusters import openvdi_list_clusters
 
@@ -34,7 +34,7 @@ from openvdi_admin.tools.clusters import openvdi_list_clusters
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@register_tool()
 async def openvdi_health_check() -> dict[str, Any]:
     """Single tool the agent invokes at session start to verify the
     broker is alive and clusters are reachable.
