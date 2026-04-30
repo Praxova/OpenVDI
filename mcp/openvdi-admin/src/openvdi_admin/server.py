@@ -99,6 +99,11 @@ import openvdi_admin.tools.sessions          # noqa: E402, F401
 import openvdi_admin.tools.templates         # noqa: E402, F401
 import openvdi_admin.tools.user_diagnostics  # noqa: E402, F401
 
+# Intent tools — orchestration over the thin-wrapper layer.
+import openvdi_admin.intent.deploy_pool       # noqa: E402, F401
+import openvdi_admin.intent.reset_environment # noqa: E402, F401
+import openvdi_admin.intent.smoke_test        # noqa: E402, F401
+
 
 async def main() -> None:
     """Async entry point. Runs the MCP server until stdin closes."""
