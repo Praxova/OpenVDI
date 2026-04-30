@@ -5,20 +5,24 @@ import { ConsolePage } from "@/pages/ConsolePage";
 import { DesktopsPage } from "@/pages/DesktopsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { SessionsPage } from "@/pages/SessionsPage";
+import { AdminPlaceholder } from "@/pages/admin";
+import { AdminRoute } from "@/auth/AdminRoute";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 
 /**
  * Route layout:
  *
- *   /login                    — public, dev-auth form
+ *   /login                    — public, LDAP/JWT sign-in
  *   /                         — protected, redirects to /desktops
- *   /desktops                 — protected, launcher (M3-04)
- *   /desktops/:poolId/console — protected, console (M3-06)
- *   /sessions                 — protected, sessions (M3-07)
+ *   /desktops                 — protected, launcher
+ *   /desktops/:poolId/console — protected, console
+ *   /sessions                 — protected, sessions
+ *   /admin/*                  — protected + admin-gated, 7 placeholders
+ *                               (each replaced by M4-18..M4-24)
  *   *                         — protected, redirects to /desktops
  *
  * The protected branch is wrapped in <ProtectedRoute> + <AppShell>.
- * Pages render inside AppShell's <Outlet />.
+ * Admin routes nest inside an <AdminRoute> that asserts role=admin.
  */
 export default function App() {
   return (
@@ -35,6 +39,46 @@ export default function App() {
               element={<ConsolePage />}
             />
             <Route path="/sessions" element={<SessionsPage />} />
+
+            <Route element={<AdminRoute />}>
+              <Route
+                path="/admin"
+                element={
+                  <AdminPlaceholder title="Admin Dashboard" comingIn="M4-18" />
+                }
+              />
+              <Route
+                path="/admin/clusters"
+                element={<AdminPlaceholder title="Clusters" comingIn="M4-19" />}
+              />
+              <Route
+                path="/admin/templates"
+                element={
+                  <AdminPlaceholder title="Templates" comingIn="M4-20" />
+                }
+              />
+              <Route
+                path="/admin/pools"
+                element={<AdminPlaceholder title="Pools" comingIn="M4-21" />}
+              />
+              <Route
+                path="/admin/desktops"
+                element={
+                  <AdminPlaceholder title="Desktops (admin)" comingIn="M4-22" />
+                }
+              />
+              <Route
+                path="/admin/sessions"
+                element={
+                  <AdminPlaceholder title="Sessions (admin)" comingIn="M4-23" />
+                }
+              />
+              <Route
+                path="/admin/audit"
+                element={<AdminPlaceholder title="Audit Log" comingIn="M4-24" />}
+              />
+            </Route>
+
             <Route path="*" element={<Navigate to="/desktops" replace />} />
           </Route>
         </Route>

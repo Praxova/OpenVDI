@@ -2,6 +2,7 @@ import { LogOut } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { AdminMenu } from "./AdminMenu";
 import { BrandMark } from "./BrandMark";
 import { ThemeToggle } from "./ThemeToggle";
 import { useAuth } from "@/auth/AuthContext";
@@ -29,9 +30,10 @@ export function AppShell() {
   const queryClient = useQueryClient();
 
   const user = state.status === "authenticated" ? state.user : null;
+  const isAdmin = user?.role === "admin";
 
-  const handleLogout = () => {
-    void logout();
+  const handleLogout = async () => {
+    await logout();
     queryClient.clear();
     navigate("/login", { replace: true });
   };
@@ -70,6 +72,7 @@ export function AppShell() {
                 {link.label}
               </NavLink>
             ))}
+            {isAdmin && <AdminMenu />}
           </nav>
         </div>
 
