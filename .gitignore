@@ -3,6 +3,7 @@
 .env.local
 *.pem
 *.key
+broker/tests/conformance.yaml
 
 # Packer build secrets — also covered by infra/packer/*/.gitignore but
 # pinned at the project level for defense in depth.

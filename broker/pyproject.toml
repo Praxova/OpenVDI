@@ -23,6 +23,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "httpx",
     "ruff>=0.4",
+    "pyyaml>=6.0",
 ]
 
 [build-system]
@@ -40,6 +41,12 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+markers = [
+    "conformance: live-cluster provider conformance suite — opt-in via --provider",
+]
+# Default-deselect the conformance suite. The conformance conftest's
+# pytest_collection_modifyitems clears this when --provider is set.
+addopts = "-m 'not conformance'"
 
 [tool.setuptools.packages.find]
 where = ["."]

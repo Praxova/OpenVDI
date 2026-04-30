@@ -1,0 +1,32 @@
+# OpenVDI provider conformance suite — config template.
+#
+# Copy this file to broker/tests/conformance.yaml and fill in values
+# for the providers you want to test. Run with:
+#
+#   pytest tests/providers/conformance/ --provider=proxmox
+#
+# This file is gitignored; do not commit credentials.
+
+proxmox:
+  # Connection
+  api_url: https://pve1.example.com:8006
+  token_id: openvdi-conformance@pve!test
+  token_secret: REPLACE_ME
+  verify_ssl: false           # set true with proper CA chain in prod-like rigs
+
+  # Test fixtures
+  default_node: pve1          # node where the template lives + clones land
+  test_template_vmid: 9001    # registered template (must have agent installed)
+  test_pool_vmid_range:
+    start: 9100
+    end:   9199               # 100 VMIDs reserved for the suite
+  test_storage: local-lvm     # where clones go (passed via CloneRequest)
+
+  # Optional knobs
+  task_timeout_seconds: 600   # wait_for_task budget for clone / destroy
+
+# vsphere:
+#   ... (post-v0 — config shape TBD when the provider lands)
+
+# hyperv:
+#   ...
