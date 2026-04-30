@@ -15,6 +15,7 @@ exercises the framework. Subsequent prompts replace it:
 EchoWorker is removed from WORKERS once at least one real worker is
 in the list; the class stays available for ad-hoc smokes.
 """
+from app.workers.audit_retention import AuditRetentionWorker
 from app.workers.base import Worker, WorkerRunner
 from app.workers.echo import EchoWorker
 from app.workers.health_checker import HealthCheckerWorker
@@ -32,12 +33,14 @@ WORKERS: list[type[Worker]] = [
     PoolProvisionerWorker,
     TaskTrackerWorker,
     HealthCheckerWorker,
+    AuditRetentionWorker,
 ]
 
 __all__ = [
     "Worker",
     "WorkerRunner",
     "WORKERS",
+    "AuditRetentionWorker",
     "EchoWorker",
     "HealthCheckerWorker",
     "PoolProvisionerWorker",
