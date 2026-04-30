@@ -148,6 +148,29 @@ Require `role=admin` in JWT.
 | `GET` | `/dashboard/summary` | Aggregate stats: total pools, desktops, active sessions, capacity |
 | `GET` | `/dashboard/capacity` | Per-pool capacity breakdown (total, available, assigned, connected) |
 
+### User Diagnostics (Admin)
+
+Read-only endpoints for diagnosing a specific user's account state. Used by
+the OpenVDI MCP server's `openvdi_diagnose_user` intent tool. Username
+matching is case-insensitive (canonicalized to lowercase before lookup).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/admin/users/{username}/desktops` | List pools the user is entitled to (DIRECT user entitlements only) with any current assignment |
+| `GET` | `/admin/users/{username}/sessions` | List the user's sessions, newest-first; supports `?include_ended=true` and `?limit=N` |
+
+**Note on group entitlements.** These endpoints surface pools entitled via
+direct user match only. Pools accessible via group membership are NOT
+included — the admin's JWT does not carry the target user's group
+memberships, and the broker does not query AD from admin endpoints. The
+MCP's diagnose tool resolves group entitlements through a separate query
+against `/api/v1/pools/...?entitlement_principal_type=group`.
+
+**Note on missing users.** If the username has no direct entitlements and
+no sessions, the response is `{data: [], error: null}` with HTTP 200.
+There is no canonical "user exists" lookup that doesn't reach LDAP, and
+"user has nothing" is the same useful answer as "user doesn't exist."
+
 ## User Endpoints
 
 Require valid JWT (any authenticated user). Filtered by the user's entitlements.

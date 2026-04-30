@@ -23,30 +23,28 @@ import logging
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Query, Request
-from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.router import user_router
 from app.database import get_db_session
 from app.models import (
-    Desktop,
-    DesktopStatus,
-    Entitlement,
-    Pool,
     Session as SessionModel,
     SessionStatus,
 )
 from app.schemas import (
     APIResponse,
     ConnectResponse,
-    UserDesktopView,
     UserPoolView,
     UserSessionView,
 )
 from app.schemas.connect import ticket_to_wire
 from app.services import broker
 from app.services.auth_service import User, current_user
+from app.services.user_diagnostics import (
+    list_pools_for_user,
+    list_sessions_for_user,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -68,66 +66,18 @@ async def list_user_desktops(
     Pools in `draining` or `deleting` state remain visible with their
     status surfaced honestly — hiding them would surprise a user whose
     in-flight session is about to be torn down.
+
+    Group entitlements are honored — passes user.groups through to
+    list_pools_for_user. The /admin/users/{username}/desktops sibling
+    passes groups=None and so sees direct user entitlements only
+    (M5-01 § "Group resolution").
     """
-    # Entitled pool ids: direct user match OR one of the user's groups.
-    # Using a single query with a `distinct()` is cheaper than fetching
-    # entitlements and then pools. `.in_((,))` on asyncpg evaluates
-    # fine (produces `IN ()` which is always false) but the outer OR
-    # means the direct-user match still fires when `user.groups` is
-    # empty.
-    entitled_stmt = (
-        select(Pool)
-        .join(Entitlement, Entitlement.pool_id == Pool.id)
-        .where(
-            or_(
-                and_(
-                    Entitlement.principal_type == "user",
-                    Entitlement.principal_name == user.username,
-                ),
-                and_(
-                    Entitlement.principal_type == "group",
-                    Entitlement.principal_name.in_(user.groups),
-                ),
-            )
-        )
-        .distinct()
-        .order_by(Pool.display_name)
+    pools = await list_pools_for_user(
+        session,
+        username=user.username,
+        groups=tuple(user.groups),
     )
-    pools = (await session.execute(entitled_stmt)).scalars().all()
-    if not pools:
-        return APIResponse(data=[])
-
-    pool_ids = [p.id for p in pools]
-    assigned_rows = (
-        await session.execute(
-            select(Desktop).where(
-                Desktop.pool_id.in_(pool_ids),
-                Desktop.assigned_user == user.username,
-                Desktop.status != DesktopStatus.DELETING,
-            )
-        )
-    ).scalars().all()
-    # At most one row per pool by the per-user-per-pool invariant
-    # (M2-08 enforces it at connect time; M2-15 at admin assign).
-    by_pool: dict[UUID, Desktop] = {d.pool_id: d for d in assigned_rows}
-
-    return APIResponse(
-        data=[
-            UserPoolView(
-                id=pool.id,
-                name=pool.name,
-                display_name=pool.display_name,
-                description=pool.description,
-                pool_type=pool.pool_type,
-                status=pool.status,
-                assigned_desktop=(
-                    UserDesktopView.model_validate(by_pool[pool.id])
-                    if pool.id in by_pool else None
-                ),
-            )
-            for pool in pools
-        ]
-    )
+    return APIResponse(data=pools)
 
 
 # ── POST /me/desktops/{pool_id}/connect ───────────────────────
@@ -200,9 +150,6 @@ async def connect_desktop(
 # ── GET /me/sessions ──────────────────────────────────────────
 
 
-_ACTIVE_SESSION_STATUSES = (SessionStatus.CONNECTING, SessionStatus.ACTIVE)
-
-
 @user_router.get(
     "/sessions",
     response_model=APIResponse[list[UserSessionView]],
@@ -219,44 +166,14 @@ async def list_user_sessions(
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[list[UserSessionView]]:
-    """List the caller's sessions. Never surfaces another user's rows.
-
-    Three-table join so desktop + pool names land inline — users don't
-    want to issue three requests to render a session list. Volume is
-    low (a handful of rows per user) so the join is cheap.
-    """
-    # LEFT OUTER joins so sessions whose desktop has been destroyed
-    # (M2-15-fix-2: sessions.desktop_id is ON DELETE SET NULL) still
-    # surface in history. The denormalized desktop/pool fields end up
-    # None for those orphans; the session-side fields always populate.
-    stmt = (
-        select(SessionModel, Desktop, Pool)
-        .outerjoin(Desktop, SessionModel.desktop_id == Desktop.id)
-        .outerjoin(Pool, Desktop.pool_id == Pool.id)
-        .where(SessionModel.username == user.username)
+    """List the caller's sessions. Never surfaces another user's rows."""
+    sessions = await list_sessions_for_user(
+        session,
+        username=user.username,
+        include_ended=include_ended,
+        limit=limit,
     )
-    if not include_ended:
-        stmt = stmt.where(SessionModel.status.in_(_ACTIVE_SESSION_STATUSES))
-    stmt = stmt.order_by(SessionModel.created_at.desc()).limit(limit)
-
-    rows = (await session.execute(stmt)).all()
-    return APIResponse(
-        data=[
-            UserSessionView(
-                id=s.id,
-                desktop_id=d.id if d is not None else None,
-                desktop_name=d.name if d is not None else None,
-                pool_id=p.id if p is not None else None,
-                pool_name=p.display_name if p is not None else None,
-                protocol=s.protocol,
-                status=s.status,
-                connected_at=s.connected_at,
-                disconnected_at=s.disconnected_at,
-                ended_at=s.ended_at,
-            )
-            for s, d, p in rows
-        ]
-    )
+    return APIResponse(data=sessions)
 
 
 # ── DELETE /me/sessions/{session_id} ──────────────────────────

@@ -624,6 +624,7 @@ async def handle_unexpected(
 # registration onto admin_router. They're unused here from a name
 # perspective — the decorators are the side effect.
 from app.api import (  # noqa: E402, F401  (import-for-side-effect)
+    admin_users,
     audit,
     clusters,
     dashboard,
