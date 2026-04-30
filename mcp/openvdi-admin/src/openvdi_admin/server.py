@@ -101,6 +101,9 @@ import openvdi_admin.tools.user_diagnostics  # noqa: E402, F401
 
 # Intent tools — orchestration over the thin-wrapper layer.
 import openvdi_admin.intent.deploy_pool       # noqa: E402, F401
+import openvdi_admin.intent.diagnose_pool     # noqa: E402, F401
+import openvdi_admin.intent.diagnose_user     # noqa: E402, F401
+import openvdi_admin.intent.health_check      # noqa: E402, F401
 import openvdi_admin.intent.reset_environment # noqa: E402, F401
 import openvdi_admin.intent.smoke_test        # noqa: E402, F401
 

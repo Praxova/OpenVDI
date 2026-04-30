@@ -77,6 +77,32 @@ class BrokerClient:
     ) -> Any:
         return await self._request("DELETE", path, params=None, body=None)
 
+    async def get_raw(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        """GET that returns the raw JSON payload, skipping envelope
+        unwrapping. For broker endpoints that intentionally bypass
+        the {data, error} envelope — currently just `/health`, which
+        per M4-12 returns a plain {"status": "ok"} so probes don't
+        depend on the envelope contract.
+
+        Auth + 401-replay still apply; only the response handling
+        differs. Non-2xx responses raise BrokerError.
+        """
+        token = await self._auth.get_token()
+        response = await self._attempt(
+            "GET", path, params, None, token,
+        )
+        if response.status_code == 401:
+            new_token = await self._auth.force_new_token()
+            response = await self._attempt(
+                "GET", path, params, None, new_token,
+            )
+        return self._handle_raw(response, path)
+
     # ── Request loop ───────────────────────────────────────────
 
     async def _request(
@@ -140,3 +166,25 @@ class BrokerClient:
             ) from exc
 
         return unwrap_envelope(payload, http_status=response.status_code)
+
+    def _handle_raw(self, response: httpx.Response, path: str) -> Any:
+        """Response handler for non-enveloped endpoints. 2xx → return
+        the raw JSON; non-2xx → BrokerError."""
+        if response.status_code == 204:
+            return None
+        if response.status_code >= 400:
+            raise BrokerError(
+                http_status=response.status_code,
+                code="HTTP_ERROR",
+                message=(
+                    f"GET {path} returned HTTP {response.status_code}"
+                ),
+            )
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise BrokerError(
+                http_status=response.status_code,
+                code="INTERNAL_ERROR",
+                message=f"GET {path} returned non-JSON response",
+            ) from exc

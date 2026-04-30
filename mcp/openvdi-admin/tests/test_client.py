@@ -138,6 +138,68 @@ class TestVerbHelpers:
             await client.close()
 
 
+class TestGetRaw:
+    """get_raw skips envelope unwrapping. /health is the canonical
+    consumer (M4-12 returns plain `{"status": "ok"}`, not enveloped)."""
+
+    async def test_returns_raw_payload(
+        self, settings, mock_broker, auth_logged_in,
+    ):
+        mock_broker.get("/health").respond(
+            json={"status": "ok", "version": "0.5.0"},
+        )
+        client = BrokerClient(auth_logged_in, settings)
+        try:
+            result = await client.get_raw("/health")
+            assert result == {"status": "ok", "version": "0.5.0"}
+        finally:
+            await client.close()
+
+    async def test_does_not_unwrap_envelope_shape(
+        self, settings, mock_broker, auth_logged_in,
+    ):
+        # Even when the broker happens to return an enveloped
+        # response on a get_raw call, we hand it back as-is.
+        mock_broker.get("/health").respond(
+            json={"data": {"status": "ok"}, "error": None},
+        )
+        client = BrokerClient(auth_logged_in, settings)
+        try:
+            result = await client.get_raw("/health")
+            assert result == {
+                "data": {"status": "ok"}, "error": None,
+            }
+        finally:
+            await client.close()
+
+    async def test_4xx_raises_http_error(
+        self, settings, mock_broker, auth_logged_in,
+    ):
+        mock_broker.get("/health").respond(status_code=503)
+        client = BrokerClient(auth_logged_in, settings)
+        try:
+            with pytest.raises(BrokerError) as exc:
+                await client.get_raw("/health")
+            assert exc.value.http_status == 503
+            assert exc.value.code == "HTTP_ERROR"
+        finally:
+            await client.close()
+
+    async def test_attaches_authorization_header(
+        self, settings, mock_broker, auth_logged_in,
+    ):
+        route = mock_broker.get("/health").respond(
+            json={"status": "ok"},
+        )
+        client = BrokerClient(auth_logged_in, settings)
+        try:
+            await client.get_raw("/health")
+            request = route.calls.last.request
+            assert request.headers["authorization"] == "Bearer tok-1"
+        finally:
+            await client.close()
+
+
 class TestEnvelopeFailures:
     async def test_2xx_with_error_envelope_raises(
         self, settings, mock_broker, auth_logged_in,
