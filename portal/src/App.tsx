@@ -10,6 +10,8 @@ import {
   ClusterFormPage,
   ClustersPage,
   DashboardPage,
+  PoolFormPage,
+  PoolsPage,
   TemplateFormPage,
   TemplatesPage,
 } from "@/pages/admin";
@@ -67,9 +69,14 @@ export default function App() {
                 path="/admin/templates/:id/edit"
                 element={<TemplateFormPage />}
               />
+              <Route path="/admin/pools" element={<PoolsPage />} />
               <Route
-                path="/admin/pools"
-                element={<AdminPlaceholder title="Pools" comingIn="M4-21" />}
+                path="/admin/pools/new"
+                element={<PoolFormPage />}
+              />
+              <Route
+                path="/admin/pools/:id/edit"
+                element={<PoolFormPage />}
               />
               <Route
                 path="/admin/desktops"

@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { useBrokerClient } from "@/api/client";
-import type { AuditEntry, DashboardSummary } from "@/types/admin";
+import type {
+  AuditEntry,
+  DashboardSummary,
+  PoolCapacityRow,
+} from "@/types/admin";
 
 /**
  * Admin query keys. Per FE3: rooted at ["admin", ...] to namespace
@@ -25,6 +29,21 @@ export function useDashboardSummaryQuery() {
   return useQuery({
     queryKey: adminKeys.dashboard,
     queryFn: () => client.get<DashboardSummary>("/api/v1/dashboard/summary"),
+  });
+}
+
+
+/**
+ * Fetch the per-pool capacity breakdown. M4-18's dashboard renders
+ * cluster-wide totals via useDashboardSummaryQuery; M4-21's PoolsPage
+ * is the first consumer of the per-pool array.
+ */
+export function useCapacityQuery() {
+  const client = useBrokerClient();
+  return useQuery({
+    queryKey: [...adminKeys.dashboard, "capacity"] as const,
+    queryFn: () =>
+      client.get<PoolCapacityRow[]>("/api/v1/dashboard/capacity"),
   });
 }
 
