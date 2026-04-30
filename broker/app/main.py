@@ -45,8 +45,10 @@ from app.api.auth import auth_router
 from app.api.router import admin_router, user_router
 from app.config import get_settings
 from app.database import async_session_factory, dispose_engine
+from app.logging import configure_logging
 from app.middleware.audit import AuditMiddleware
 from app.middleware.auth import DevAuthMiddleware, JWTAuthMiddleware
+from app.middleware.request_id import RequestIdMiddleware
 from app.models import Cluster, ClusterStatus
 from app.providers.base import HypervisorProvider
 from app.providers.exceptions import (
@@ -105,18 +107,18 @@ def _ensure_encryption_key() -> None:
 
 
 def _configure_logging() -> None:
-    """Human-readable logs for M2. Structured JSON arrives in M4+."""
-    level = os.environ.get("OPENVDI_LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    """Configure logging from Settings (M4-12).
+
+    Replaces M2's inline os.environ reads + basicConfig. The actual
+    formatter / filter / handler wiring lives in app/logging.py;
+    Settings is the single source of truth (per X6).
+    """
+    settings = get_settings()
+    configure_logging(
+        log_format=settings.openvdi_log_format,
+        level=settings.openvdi_log_level,
+        level_httpx=settings.openvdi_log_level_httpx,
     )
-    # httpx is chatty on DEBUG; dial it down unless the operator asks.
-    if os.environ.get("OPENVDI_LOG_LEVEL_HTTPX"):
-        logging.getLogger("httpx").setLevel(os.environ["OPENVDI_LOG_LEVEL_HTTPX"])
-    else:
-        logging.getLogger("httpx").setLevel("WARNING")
 
 
 # ── Envelope helpers used by exception handlers ───────────────
@@ -323,17 +325,16 @@ app = FastAPI(
 # ── Middleware ────────────────────────────────────────────────
 #
 # add_middleware is LIFO — the LAST added runs OUTERMOST. Target order
-# outermost → innermost:  Auth → Audit → handlers.
-#   Auth must run first so it sets request.state.user.
-#   Audit runs next so it can record the actor.
-# Hence Audit is added first (inner), Auth is added second (outer).
+# outermost → innermost:
+#   RequestId (M4-12) → Auth → Audit → handlers.
+# RequestId outermost so the request_id ContextVar is set before any
+# other middleware logs. Auth next so it sets request.state.user.
+# Audit innermost so it can record the actor.
 #
-# Mode-conditional pick: the DevAuth path stays for local development
-# against the M2 X-Dev-* header contract; production runs JWTAuth
-# against the access tokens M4-04's auth endpoints issue. Switching
-# modes requires a broker restart — settings is read once at module
-# import (add_middleware must be called before the app accepts
-# requests, which is before lifespan runs).
+# Auth-mode pick: the DevAuth path stays for local development against
+# the M2 X-Dev-* header contract; production runs JWTAuth against the
+# access tokens M4-04's auth endpoints issue. Switching modes requires
+# a broker restart — settings is read once at module import.
 app.add_middleware(AuditMiddleware)      # innermost: reads request.state.user
 if get_settings().is_dev_auth:
     app.add_middleware(DevAuthMiddleware)
@@ -344,6 +345,7 @@ if get_settings().is_dev_auth:
 else:
     app.add_middleware(JWTAuthMiddleware)
     logger.info("Auth middleware: JWT (Bearer access token)")
+app.add_middleware(RequestIdMiddleware)  # outermost: sets request_id ContextVar
 
 
 # ── Dependencies ──────────────────────────────────────────────
