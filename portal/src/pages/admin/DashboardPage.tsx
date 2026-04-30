@@ -7,17 +7,16 @@ import {
   Server,
 } from "lucide-react";
 
+import { useClustersQuery } from "@/api/admin/clusters";
 import {
-  useClustersQuery,
   useDashboardSummaryQuery,
   useRecentAuditQuery,
 } from "@/api/admin/dashboard";
-import { StatusBadge, type StatusTone } from "@/components/StatusBadge";
+import { StatusBadge, clusterStatusBadge } from "@/components/StatusBadge";
 import { formatRelativeTime } from "@/lib/time";
 import type {
   AuditEntry,
   ClusterRead,
-  ClusterStatus,
   DashboardSummary,
 } from "@/types/admin";
 
@@ -169,24 +168,15 @@ function ClusterHealthCard() {
 
 
 function ClusterRow({ cluster }: { cluster: ClusterRead }) {
+  const badge = clusterStatusBadge(cluster.status);
   return (
     <li className="flex items-center justify-between py-2">
       <span className="text-body-sm text-text-primary truncate">
         {cluster.name}
       </span>
-      <StatusBadge tone={clusterStatusTone(cluster.status)} label={cluster.status} />
+      <StatusBadge tone={badge.tone} label={badge.label} />
     </li>
   );
-}
-
-
-function clusterStatusTone(status: ClusterStatus): StatusTone {
-  switch (status) {
-    case "active":      return "success";
-    case "pending":     return "neutral";
-    case "maintenance": return "warning";
-    case "offline":     return "danger";
-  }
 }
 
 

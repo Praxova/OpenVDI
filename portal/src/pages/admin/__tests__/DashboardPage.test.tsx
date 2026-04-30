@@ -160,8 +160,10 @@ describe("DashboardPage", () => {
     renderPage();
     expect(await screen.findByText("pve1")).toBeDefined();
     expect(screen.getByText("pve2")).toBeDefined();
-    expect(screen.getByText("active")).toBeDefined();
-    expect(screen.getByText("offline")).toBeDefined();
+    // "Active" appears as both a Sessions stat label and the badge
+    // for the active cluster — two matches.
+    expect(screen.getAllByText("Active").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Offline")).toBeDefined();
   });
 
   it("renders empty state for clusters when none registered", async () => {

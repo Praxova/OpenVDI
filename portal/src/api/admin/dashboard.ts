@@ -1,11 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { useBrokerClient } from "@/api/client";
-import type {
-  AuditEntry,
-  ClusterRead,
-  DashboardSummary,
-} from "@/types/admin";
+import type { AuditEntry, DashboardSummary } from "@/types/admin";
 
 /**
  * Admin query keys. Per FE3: rooted at ["admin", ...] to namespace
@@ -29,19 +25,6 @@ export function useDashboardSummaryQuery() {
   return useQuery({
     queryKey: adminKeys.dashboard,
     queryFn: () => client.get<DashboardSummary>("/api/v1/dashboard/summary"),
-  });
-}
-
-
-/**
- * Fetch all clusters. M4-19 will extend this with create/update/delete
- * mutations; M4-18 only consumes the list.
- */
-export function useClustersQuery() {
-  const client = useBrokerClient();
-  return useQuery({
-    queryKey: adminKeys.clusters,
-    queryFn: () => client.get<ClusterRead[]>("/api/v1/clusters"),
   });
 }
 

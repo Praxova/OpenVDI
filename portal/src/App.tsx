@@ -5,7 +5,12 @@ import { ConsolePage } from "@/pages/ConsolePage";
 import { DesktopsPage } from "@/pages/DesktopsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { SessionsPage } from "@/pages/SessionsPage";
-import { AdminPlaceholder, DashboardPage } from "@/pages/admin";
+import {
+  AdminPlaceholder,
+  ClusterFormPage,
+  ClustersPage,
+  DashboardPage,
+} from "@/pages/admin";
 import { AdminRoute } from "@/auth/AdminRoute";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 
@@ -42,9 +47,14 @@ export default function App() {
 
             <Route element={<AdminRoute />}>
               <Route path="/admin" element={<DashboardPage />} />
+              <Route path="/admin/clusters" element={<ClustersPage />} />
               <Route
-                path="/admin/clusters"
-                element={<AdminPlaceholder title="Clusters" comingIn="M4-19" />}
+                path="/admin/clusters/new"
+                element={<ClusterFormPage />}
+              />
+              <Route
+                path="/admin/clusters/:id/edit"
+                element={<ClusterFormPage />}
               />
               <Route
                 path="/admin/templates"

@@ -20,9 +20,8 @@ export type ClusterStatus =
 
 
 /**
- * Mirror of `app.schemas.cluster.ClusterRead`. The broker's read
- * schema explicitly OMITS `token_secret` — it's never on the wire,
- * not even as a redacted placeholder.
+ * Mirror of `app.schemas.cluster.ClusterRead`. The broker NEVER
+ * returns the token_secret field — write-only by design.
  */
 export interface ClusterRead {
   id: string;
@@ -36,6 +35,45 @@ export interface ClusterRead {
   status: ClusterStatus;
   created_at: string;
   updated_at: string;
+}
+
+
+/**
+ * Mirror of `app.schemas.cluster.ClusterCreate`. The broker validates
+ * credentials by calling `provider.ping()` post-insert; submission
+ * blocks until that completes (typically 1-2 seconds).
+ */
+export interface ClusterCreate {
+  name: string;
+  /** Defaults to "proxmox" on the broker side; v0 portal never sends
+      anything else. Field included for forward-compat. */
+  provider_type?: string;
+  api_url: string;
+  token_id: string;
+  token_secret: string;
+  verify_ssl?: boolean;
+  node_filter?: string | null;
+  provider_config?: Record<string, unknown>;
+}
+
+
+/**
+ * Mirror of `app.schemas.cluster.ClusterUpdate`. All fields optional;
+ * omitted keys are not modified on the broker side.
+ *
+ * Per FE8: token_secret is omitted (key not present in JSON) to
+ * preserve the existing value. The form code special-cases empty
+ * input by deleting the key from the payload.
+ */
+export interface ClusterUpdate {
+  name?: string;
+  provider_type?: string;
+  api_url?: string;
+  token_id?: string;
+  token_secret?: string;
+  verify_ssl?: boolean;
+  node_filter?: string | null;
+  provider_config?: Record<string, unknown>;
 }
 
 

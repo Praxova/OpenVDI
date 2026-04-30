@@ -1,4 +1,5 @@
 import type { DesktopStatus, PoolStatus, SessionStatus } from "@/types";
+import type { ClusterStatus } from "@/types/admin";
 
 export type StatusTone = "info" | "success" | "warning" | "danger" | "neutral";
 
@@ -135,4 +136,21 @@ export function poolTypeBadge(
   return poolType === "persistent"
     ? { tone: "neutral", label: "Persistent" }
     : { tone: "neutral", label: "Non-persistent" };
+}
+
+/**
+ * Translate a `ClusterStatus` to a badge.
+ *
+ *   pending      → neutral    "Pending"
+ *   active       → success    "Active"
+ *   maintenance  → warning    "Maintenance"
+ *   offline      → danger     "Offline"
+ */
+export function clusterStatusBadge(status: ClusterStatus): BadgeShape {
+  switch (status) {
+    case "pending":     return { tone: "neutral", label: "Pending" };
+    case "active":      return { tone: "success", label: "Active" };
+    case "maintenance": return { tone: "warning", label: "Maintenance" };
+    case "offline":     return { tone: "danger",  label: "Offline" };
+  }
 }
