@@ -27,6 +27,10 @@ interface DataTableProps<T> {
   emptyMessage?: string;
   /** Optional className for outer wrapper. */
   className?: string;
+  /** Optional row-click handler. When set, rows render with hover +
+      cursor-pointer styling. Cells that contain interactive elements
+      should `e.stopPropagation()` to avoid triggering the handler. */
+  onRowClick?: (item: T) => void;
 }
 
 
@@ -54,6 +58,7 @@ export function DataTable<T>({
   rowKey,
   emptyMessage = "No items.",
   className = "",
+  onRowClick,
 }: DataTableProps<T>) {
   return (
     <div
@@ -91,7 +96,17 @@ export function DataTable<T>({
               {data.map((item) => (
                 <tr
                   key={rowKey(item)}
-                  className="border-t border-border-subtle"
+                  onClick={
+                    onRowClick !== undefined
+                      ? () => onRowClick(item)
+                      : undefined
+                  }
+                  className={
+                    "border-t border-border-subtle " +
+                    (onRowClick !== undefined
+                      ? "cursor-pointer hover:bg-surface-2"
+                      : "")
+                  }
                 >
                   {columns.map((col) => (
                     <td

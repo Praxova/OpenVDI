@@ -6,8 +6,9 @@
  * For each interface, the broker schema is the source of truth — if
  * the broker shape changes, this file updates in lockstep.
  */
-import type { PoolStatus, PoolType } from "./desktops";
-export type { PoolStatus, PoolType };
+import type { DesktopStatus, PoolStatus, PoolType } from "./desktops";
+import type { SessionStatus } from "./sessions";
+export type { DesktopStatus, PoolStatus, PoolType };
 
 // ── Cluster ─────────────────────────────────────────────────
 
@@ -284,6 +285,72 @@ export interface PoolCapacityRow {
   error: number;
   deleting: number;
   maintenance: number;
+}
+
+
+// ── Desktop ─────────────────────────────────────────────────
+
+
+export type PowerAction = "start" | "stop" | "shutdown" | "reboot";
+
+
+/**
+ * Mirror of `app.schemas.desktop.DesktopRead`. Note that
+ * `pve_task_upid` and `pve_task_kind` are deliberately NEVER on the
+ * wire (M2-13 invariant) — operators poll `status` / `error_message`.
+ */
+export interface DesktopRead {
+  id: string;
+  pool_id: string;
+  pve_vmid: number;
+  pve_node: string;
+  name: string;
+  assigned_user: string | null;
+  assignment_type: string | null;
+  status: DesktopStatus;
+  power_state: string;
+  last_connected: string | null;
+  last_disconnected: string | null;
+  provisioned_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+
+/**
+ * Mirror of `app.schemas.session.SessionRead` — used inline as
+ * `active_session` on the admin desktop detail.
+ */
+export interface SessionRead {
+  id: string;
+  desktop_id: string | null;
+  username: string;
+  protocol: string;
+  client_ip: string | null;
+  status: SessionStatus;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  ended_at: string | null;
+  os_user: string | null;
+  os_info: Record<string, unknown> | null;
+  vm_ip_address: string | null;
+  last_heartbeat: string | null;
+  idle_since: string | null;
+  created_at: string;
+}
+
+
+/** Mirror of `app.schemas.desktop.DesktopReadDetailed`. */
+export interface DesktopReadDetailed extends DesktopRead {
+  active_session: SessionRead | null;
+  live_power_state: string;
+}
+
+
+/** POST body for `/desktops/{id}/assign`. */
+export interface DesktopAssignRequest {
+  username: string;
 }
 
 

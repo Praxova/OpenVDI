@@ -10,6 +10,7 @@ import {
   ClusterFormPage,
   ClustersPage,
   DashboardPage,
+  DesktopsPage as AdminDesktopsPage,
   PoolFormPage,
   PoolsPage,
   TemplateFormPage,
@@ -80,9 +81,7 @@ export default function App() {
               />
               <Route
                 path="/admin/desktops"
-                element={
-                  <AdminPlaceholder title="Desktops (admin)" comingIn="M4-22" />
-                }
+                element={<AdminDesktopsPage />}
               />
               <Route
                 path="/admin/sessions"
