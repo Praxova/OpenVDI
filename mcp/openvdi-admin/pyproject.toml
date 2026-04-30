@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openvdi-admin"
+version = "0.5.0"
+description = "MCP server for operating an OpenVDI broker."
+authors = [{name = "Praxova", email = "alton@praxova.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+# Aligned with pve-spec-query's MCP package choice — both use the
+# official MCP Python SDK (`mcp[cli]`) which bundles the FastMCP
+# wrapper at `mcp.server.fastmcp`. Mixing two MCP packages
+# (`fastmcp` + `mcp`) in one agent host works but adds cognitive
+# load; staying on one is easier for contributors who jump between
+# the Praxova MCPs.
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+openvdi-admin = "openvdi_admin.server:main_sync"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openvdi_admin"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
