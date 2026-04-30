@@ -13,6 +13,7 @@ import {
   DesktopsPage as AdminDesktopsPage,
   PoolFormPage,
   PoolsPage,
+  SessionsPage as AdminSessionsPage,
   TemplateFormPage,
   TemplatesPage,
 } from "@/pages/admin";
@@ -85,9 +86,7 @@ export default function App() {
               />
               <Route
                 path="/admin/sessions"
-                element={
-                  <AdminPlaceholder title="Sessions (admin)" comingIn="M4-23" />
-                }
+                element={<AdminSessionsPage />}
               />
               <Route
                 path="/admin/audit"

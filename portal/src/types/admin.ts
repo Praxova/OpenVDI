@@ -8,7 +8,7 @@
  */
 import type { DesktopStatus, PoolStatus, PoolType } from "./desktops";
 import type { SessionStatus } from "./sessions";
-export type { DesktopStatus, PoolStatus, PoolType };
+export type { DesktopStatus, PoolStatus, PoolType, SessionStatus };
 
 // ── Cluster ─────────────────────────────────────────────────
 
@@ -351,6 +351,47 @@ export interface DesktopReadDetailed extends DesktopRead {
 /** POST body for `/desktops/{id}/assign`. */
 export interface DesktopAssignRequest {
   username: string;
+}
+
+
+// ── Admin Session views ─────────────────────────────────────
+
+
+/**
+ * Mirror of `app.schemas.session.SessionReadAdmin`.
+ *
+ * desktop/pool fields are nullable: orphaned sessions (whose desktop
+ * was destroyed; FK is ON DELETE SET NULL per M2-15-fix-2) surface
+ * here with these fields set to null. Render as "(deleted)".
+ *
+ * `connection_info` is NEVER on the wire — the broker's schema
+ * deliberately omits it; this type mirrors that.
+ */
+export interface SessionReadAdmin {
+  id: string;
+  desktop_id: string | null;
+  desktop_name: string | null;
+  pool_id: string | null;
+  pool_name: string | null;
+  pool_type: PoolType | null;
+  username: string;
+  protocol: string;
+  client_ip: string | null;
+  status: SessionStatus;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  ended_at: string | null;
+  last_heartbeat: string | null;
+  created_at: string;
+}
+
+
+/** Mirror of `app.schemas.session.SessionReadDetailed`. */
+export interface SessionReadDetailed extends SessionReadAdmin {
+  os_user: string | null;
+  os_info: Record<string, unknown> | null;
+  vm_ip_address: string | null;
+  idle_since: string | null;
 }
 
 

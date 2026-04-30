@@ -5,5 +5,6 @@ export { DashboardPage } from "./DashboardPage";
 export { DesktopsPage } from "./DesktopsPage";
 export { PoolFormPage } from "./PoolFormPage";
 export { PoolsPage } from "./PoolsPage";
+export { SessionsPage } from "./SessionsPage";
 export { TemplateFormPage } from "./TemplateFormPage";
 export { TemplatesPage } from "./TemplatesPage";
