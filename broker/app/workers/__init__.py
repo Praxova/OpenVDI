@@ -17,6 +17,7 @@ in the list; the class stays available for ad-hoc smokes.
 """
 from app.workers.base import Worker, WorkerRunner
 from app.workers.echo import EchoWorker
+from app.workers.health_checker import HealthCheckerWorker
 from app.workers.pool_provisioner import PoolProvisionerWorker
 from app.workers.session_monitor import SessionMonitorWorker
 from app.workers.task_tracker import TaskTrackerWorker
@@ -30,6 +31,7 @@ WORKERS: list[type[Worker]] = [
     SessionMonitorWorker,
     PoolProvisionerWorker,
     TaskTrackerWorker,
+    HealthCheckerWorker,
 ]
 
 __all__ = [
@@ -37,6 +39,7 @@ __all__ = [
     "WorkerRunner",
     "WORKERS",
     "EchoWorker",
+    "HealthCheckerWorker",
     "PoolProvisionerWorker",
     "SessionMonitorWorker",
     "TaskTrackerWorker",

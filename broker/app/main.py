@@ -30,7 +30,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, AsyncIterator
 from uuid import UUID
@@ -203,6 +203,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     app.state.providers: dict[UUID, HypervisorProvider] = {}
+    # Per-broker timestamp of when each provider was constructed. M4-11's
+    # health_checker uses this to detect cluster-config-sync events
+    # (W13): when `cluster.updated_at` advances past this timestamp, the
+    # broker reconstructs its provider. Lost on restart by design — the
+    # lifespan rebuilds everything fresh.
+    app.state.provider_constructed_at: dict[UUID, datetime] = {}
     app.state.ping_tasks: set[asyncio.Task] = set()
 
     # Load clusters the broker should try to serve.
@@ -238,6 +244,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 to_mark_offline.append(cluster)
                 continue
             app.state.providers[cluster.id] = provider
+            app.state.provider_constructed_at[cluster.id] = (
+                datetime.now(timezone.utc)
+            )
             logger.info(
                 "constructed provider for cluster %s (%s)",
                 cluster.name, cluster.id,
