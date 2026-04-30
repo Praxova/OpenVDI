@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 _DEFAULT_POLL_INTERVAL_SECONDS = 2.0
 
 
+# Default per-operation timeouts per T6.
+# Power transitions (start/stop/shutdown/reboot) finish in seconds on
+# healthy hosts; 30s leaves enough headroom for slow guest agents.
+_DEFAULT_DESKTOP_POWER_TIMEOUT_SECONDS = 30
+# Rebuild = stop + destroy + re-clone + start. Local-lvm linked clones
+# typically complete in 30-90s; 600s sizes for slow storage / loaded
+# clusters. Agents on fast hardware can pass timeout_seconds=120.
+_DEFAULT_DESKTOP_REBUILD_TIMEOUT_SECONDS = 600
+
+
 async def wait_for_pool_terminal_state(
     *,
     fetch: Callable[[], Awaitable[dict[str, Any]]],
@@ -105,3 +115,75 @@ def pool_drain_terminal(state: dict[str, Any]) -> bool:
     `GET /sessions?pool_id=X&status=active`.
     """
     return state.get("_active_session_count", 0) == 0
+
+
+async def wait_for_desktop_terminal_state(
+    *,
+    fetch: Callable[[], Awaitable[dict[str, Any]]],
+    is_terminal: Callable[[dict[str, Any]], bool],
+    timeout_seconds: int,
+    poll_interval: float = _DEFAULT_POLL_INTERVAL_SECONDS,
+) -> dict[str, Any]:
+    """Same shape as wait_for_pool_terminal_state, parameterized for
+    desktop state. Used by power transitions and rebuild.
+
+    Kept as a separate function from the pool waiter for clarity;
+    if a third resource gains polling needs, M6+ can merge them
+    behind a `resource_type` parameter.
+    """
+    deadline = asyncio.get_event_loop().time() + timeout_seconds
+    last_state: dict[str, Any] = await fetch()
+
+    if is_terminal(last_state):
+        return last_state
+
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(poll_interval)
+        last_state = await fetch()
+        if is_terminal(last_state):
+            return last_state
+
+    logger.warning(
+        "wait_for_desktop_terminal_state timed out after %ds; "
+        "returning last observed state",
+        timeout_seconds,
+    )
+    return last_state
+
+
+def desktop_power_terminal(
+    target_power_state: str,
+) -> Callable[[dict[str, Any]], bool]:
+    """Factory: returns a predicate that's True when the desktop's
+    `power_state` matches the target.
+
+    Different power actions converge on different terminal states
+    (start/reboot → 'running', stop/shutdown → 'stopped'); the
+    factory parameterizes the predicate per call.
+
+    Reads `power_state` (the row's last-known state). The broker's
+    GET endpoint opportunistically reconciles this from the live
+    provider read on each call, so the value is fresh.
+    """
+
+    def _predicate(state: dict[str, Any]) -> bool:
+        return state.get("power_state") == target_power_state
+
+    return _predicate
+
+
+def desktop_rebuild_terminal(state: dict[str, Any]) -> bool:
+    """True when a rebuilt desktop is back to operational state.
+
+    Rebuild flow: stop → destroy → re-clone → start. Terminal when
+    `status == 'available'` AND `power_state == 'running'`.
+
+    `status == 'error'` is intentionally NOT terminal — the polling
+    helper's timeout will fire and the agent sees the error state in
+    the returned snapshot. The broker may retry; T6's "return last
+    state" semantics let the agent decide what to do.
+    """
+    return (
+        state.get("status") == "available"
+        and state.get("power_state") == "running"
+    )
