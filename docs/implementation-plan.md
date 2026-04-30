@@ -373,28 +373,55 @@ This milestone is being restarted. The prior attempt (Sonnet 4.6) was built agai
 - Bundle-size code-splitting; the console route's noVNC payload is in the main bundle (M5+).
 - Real-time updates via websocket; the launcher is fetch-on-mount with TanStack staleTime (M5+).
 
-### Milestone 4 — "Sessions work, admins can see, conformance is real" (Weekend 4)
+### Milestone 4 — "Production-ready v0"
 
-**Goal:** Session tracking, background workers, admin visibility, auth, AND the first formal provider conformance suite.
+**Goal:** Real LDAP/JWT auth, the five background workers, the refresh-on-logoff cycle, the admin portal, and the provider conformance suite. After this milestone OpenVDI v0 ships.
 
-**Deliverables:**
-- `broker/app/workers/session_monitor.py` — Guest agent polling loop
-- `broker/app/workers/pool_provisioner.py` — Warm spare management
-- `broker/app/workers/task_tracker.py` — Async provider task tracking
-- `broker/app/services/auth_service.py` — LDAP/AD authentication
-- `broker/app/middleware/auth.py` — JWT token middleware
-- `broker/app/api/auth.py` — Login endpoint
-- `portal/src/components/AdminDashboard.tsx` — Pool status, session list
-- `portal/src/pages/LoginPage.tsx`
-- `broker/tests/providers/conformance/` — Provider-agnostic test suite that any provider implementation must pass against a live test cluster. Tests assert behavior of the `HypervisorProvider` interface (clone → start → agent_ping → destroy round-trip, snapshot lifecycle, task success/failure paths, lock error handling). The Proxmox provider must pass it.
+**Deliverables (v0):**
+
+- **Auth & migrations**
+  - LDAP search-and-bind via service account (`broker/app/services/ldap_service.py`).
+  - JWT issuance + validation (HS256, 15-min access + 24-h refresh in DB-backed `auth_tokens` table).
+  - HttpOnly + Secure + SameSite=Strict refresh cookie scoped to `/api/v1/auth`.
+  - `OPENVDI_AUTH_MODE=jwt|dev` switch; broker refuses to start without explicit setting.
+  - Alembic introduced. Baseline `0001_baseline_m3` + `0002_auth_tokens`. Raw SQL files retained as historical artifacts only.
+- **Workers**
+  - `app/workers/` framework with leader election via `pg_try_advisory_lock` per worker (multi-broker-ready from day one).
+  - `session_monitor` (15s) — guest-agent polling + 3-tick logoff debounce.
+  - `pool_provisioner` (30s) — warm-spare maintenance.
+  - `task_tracker` (5s) — replaces M2's BackgroundTasks-driven UPID polling.
+  - `health_checker` (60s) — cluster ping + W13 cross-broker config sync + stuck-provisioning recovery.
+  - `audit_retention` (24h, ±2h jitter) — daily prune of rows past `OPENVDI_AUDIT_RETENTION_DAYS` (default 90).
+- **Refresh-on-logoff cycle**
+  - `provisioner.refresh_desktop` — non-persistent rollback to `openvdi-base`.
+  - `provisioner.delete_desktop_on_logoff` — `pool.delete_on_logoff=true` path.
+- **Observability**
+  - JSON structured logging (`OPENVDI_LOG_FORMAT=json|text`).
+  - `X-Request-ID` middleware + ContextVar-propagated request_id in every log line.
+- **Provider conformance suite**
+  - `broker/tests/providers/conformance/` — pytest with `--provider=proxmox` flag. Live cluster requirement; not in CI.
+  - 5 test files (~33 tests) covering capabilities, lifecycle, snapshots, tasks, guest agent.
+  - Provider gap-fill: `reboot_vm`, `agent_get_osinfo`, `agent_get_network`, `agent_exec`, `agent_exec_status`.
+- **Admin portal**
+  - LDAP login via `/login` form replacing M3 dev-auth.
+  - Bearer-token lifecycle in `BrokerClient`: 401 → `/auth/refresh` → replay; refresh-failure → bounce to `/login`. De-duplicated concurrent refreshes.
+  - `<AdminRoute>` + Admin ▾ header dropdown for role-gated nav.
+  - Pages: dashboard (4 cards), clusters CRUD, templates CRUD + validate, pools CRUD + provision/drain + entitlements, desktops list + actions + drawer, sessions list + force-disconnect + drawer, audit viewer + drawer + pagination.
+  - `DataTable` + `FormField` primitives at `components/admin/`; `Section` / `Field` / `CopyableField` extracted in M4-24.
 
 **Validation:**
-1. Login with AD credentials
-2. User sees only entitled pools
-3. Connect to desktop via noVNC
-4. Admin dashboard shows active session with guest agent data (os_user, IP)
-5. User logs off OS → session monitor detects → desktop refreshed/recycled
-6. `pytest broker/tests/providers/conformance/ --provider=proxmox` passes end-to-end
+
+1. Login as a real LDAP user. Access protected pages. Logout revokes the refresh token; subsequent API calls return 401.
+2. Workers visible in the broker logs. Each ticks at its declared cadence; leader election survives a broker restart (advisory lock auto-releases on connection close).
+3. Conformance suite passes against the test PVE cluster (`pytest broker/tests/providers/conformance/ --provider=proxmox`).
+4. Admin Playwright spec passes (`pnpm exec playwright test admin-flow` — see `portal/README.md` → "M4 admin smoke test" for env-var setup).
+5. `m4-complete` git tag applied at HEAD.
+
+**Out of scope (deferred to v1+):**
+
+KasmVNC display protocol, WAN reverse proxy, code-splitting, real-time portal updates (websockets), mobile/tablet polish, broker rate limiting, multi-tenant isolation, MFA, second hypervisor provider, OpenTelemetry tracing, audit shipping to external SIEM.
+
+**Tag:** `m4-complete`
 
 ### Milestone 5+ — Polish and Extend
 

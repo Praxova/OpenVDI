@@ -165,6 +165,50 @@ can't reasonably exercise.
 If any of the above fails, treat it as an M3 bug and fix before
 declaring milestone complete.
 
+## M4 admin smoke test
+
+Validates the admin happy path end-to-end: admin LDAP login, pool
+registration, warm-spare provisioning, entitlement grant, user
+connect, force-disconnect, audit verification. Requires the broker
+running in `OPENVDI_AUTH_MODE=jwt` + a populated LDAP test realm
+with both an admin user (member of `OPENVDI_LDAP_ADMIN_GROUP`) and a
+regular user.
+
+```bash
+# Required env vars (in addition to M3 connect-flow setup):
+export OPENVDI_TEST_ADMIN_USER=<ldap-admin-user>
+export OPENVDI_TEST_ADMIN_PASSWORD=<password>
+export OPENVDI_TEST_USER=<ldap-regular-user>
+export OPENVDI_TEST_USER_PASSWORD=<password>
+
+# Optional overrides (defaults shown):
+export OPENVDI_TEST_CLUSTER_NAME=e2e-cluster
+export OPENVDI_TEST_TEMPLATE_NAME=e2e-template
+export OPENVDI_TEST_VMID_RANGE_START=9000
+
+# Run only the admin spec (M3 connect-flow is independent):
+pnpm exec playwright test admin-flow
+
+# Or run the full suite:
+pnpm e2e
+```
+
+**Pre-staged state on the test cluster:**
+- A registered cluster named `e2e-cluster` (or `OPENVDI_TEST_CLUSTER_NAME`).
+- A registered template named `e2e-template` (or `OPENVDI_TEST_TEMPLATE_NAME`).
+- The base template VM exists in PVE with the `openvdi-base` snapshot.
+- A free VMID range starting at `OPENVDI_TEST_VMID_RANGE_START` (10 IDs reserved).
+
+**The test:**
+- Creates an ephemeral pool named `e2e-pool-${timestamp}`.
+- Cleans up via `DELETE /api/v1/pools/{id}` in `afterEach`.
+- If cleanup fails (broker down, session stuck), prints a warning —
+  manual cleanup may be needed. Same posture as the M3 connect-flow's
+  best-effort cleanup.
+
+**Auto-skips** if the env vars above aren't set, so contributors
+without the LDAP test realm aren't blocked.
+
 ## M3 prompt history
 
 - M3-01: scaffold + design-system pickup.

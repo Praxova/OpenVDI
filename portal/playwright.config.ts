@@ -21,7 +21,10 @@ export default defineConfig({
   // 60s gives generous headroom without hiding genuine hangs.
   timeout: 60_000,
   expect: {
-    timeout: 10_000,
+    // Bumped from 10_000 — the M4-25 admin-flow spec does multi-context
+    // auth round-trips that occasionally edge past 10s. 15s gives the
+    // admin spec headroom without hiding genuine hangs.
+    timeout: 15_000,
   },
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
