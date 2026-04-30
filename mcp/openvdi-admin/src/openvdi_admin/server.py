@@ -87,10 +87,13 @@ def build_server(settings: Settings | None = None) -> FastMCP:
 
 
 # Register tools by importing the modules. The @mcp.tool() decorators
-# in each module side-effect onto `mcp` at import time. M5-04 / M5-05
-# add more imports here.
+# in each module side-effect onto `mcp` at import time. M5-05 adds
+# more imports here.
+import openvdi_admin.tools.audit         # noqa: E402, F401
 import openvdi_admin.tools.clusters      # noqa: E402, F401
+import openvdi_admin.tools.dashboard     # noqa: E402, F401
 import openvdi_admin.tools.entitlements  # noqa: E402, F401
+import openvdi_admin.tools.pools         # noqa: E402, F401
 import openvdi_admin.tools.templates     # noqa: E402, F401
 
 
