@@ -5,7 +5,7 @@ import { ConsolePage } from "@/pages/ConsolePage";
 import { DesktopsPage } from "@/pages/DesktopsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { SessionsPage } from "@/pages/SessionsPage";
-import { AdminPlaceholder } from "@/pages/admin";
+import { AdminPlaceholder, DashboardPage } from "@/pages/admin";
 import { AdminRoute } from "@/auth/AdminRoute";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 
@@ -41,12 +41,7 @@ export default function App() {
             <Route path="/sessions" element={<SessionsPage />} />
 
             <Route element={<AdminRoute />}>
-              <Route
-                path="/admin"
-                element={
-                  <AdminPlaceholder title="Admin Dashboard" comingIn="M4-18" />
-                }
-              />
+              <Route path="/admin" element={<DashboardPage />} />
               <Route
                 path="/admin/clusters"
                 element={<AdminPlaceholder title="Clusters" comingIn="M4-19" />}
