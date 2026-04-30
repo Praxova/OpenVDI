@@ -1,12 +1,12 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { Check, Copy, X } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { X } from "lucide-react";
 
 import { useSessionDetailQuery } from "@/api/admin/sessions";
+import {
+  CopyableField,
+  Field,
+  Section,
+} from "@/components/admin/Drawer";
 import {
   StatusBadge,
   sessionStatusBadge,
@@ -232,78 +232,3 @@ export function SessionDetailDrawer({
 }
 
 
-// ── Section / Field / CopyableField helpers ─────────────────
-// Duplicated from M4-22's DesktopDetailDrawer.tsx. Three duplications
-// = M4-24's extraction trigger; v0 keeps the duplicate.
-
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h3 className="font-body text-body-sm font-semibold text-text-tertiary uppercase tracking-wide">
-        {title}
-      </h3>
-      <dl className="flex flex-col gap-1.5">{children}</dl>
-    </section>
-  );
-}
-
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="grid grid-cols-[8rem_1fr] gap-2 items-baseline">
-      <dt className="text-text-tertiary text-body-sm">{label}</dt>
-      <dd className="text-body-sm">{children}</dd>
-    </div>
-  );
-}
-
-
-function CopyableField({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Best effort.
-    }
-  };
-
-  return (
-    <div className="grid grid-cols-[8rem_1fr] gap-2 items-baseline">
-      <dt className="text-text-tertiary text-body-sm">{label}</dt>
-      <dd className="text-body-sm flex items-center gap-2 min-w-0">
-        <span className="font-mono text-text-primary truncate">
-          {value}
-        </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          aria-label={`Copy ${label}`}
-          className="p-1 rounded hover:bg-surface-2 text-text-secondary flex-shrink-0"
-        >
-          {copied ? (
-            <Check size={14} aria-hidden />
-          ) : (
-            <Copy size={14} aria-hidden />
-          )}
-        </button>
-      </dd>
-    </div>
-  );
-}

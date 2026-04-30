@@ -1,4 +1,4 @@
-export { AdminPlaceholder } from "./AdminPlaceholder";
+export { AuditPage } from "./AuditPage";
 export { ClusterFormPage } from "./ClusterFormPage";
 export { ClustersPage } from "./ClustersPage";
 export { DashboardPage } from "./DashboardPage";

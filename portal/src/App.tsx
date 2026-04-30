@@ -6,7 +6,7 @@ import { DesktopsPage } from "@/pages/DesktopsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { SessionsPage } from "@/pages/SessionsPage";
 import {
-  AdminPlaceholder,
+  AuditPage,
   ClusterFormPage,
   ClustersPage,
   DashboardPage,
@@ -88,10 +88,7 @@ export default function App() {
                 path="/admin/sessions"
                 element={<AdminSessionsPage />}
               />
-              <Route
-                path="/admin/audit"
-                element={<AdminPlaceholder title="Audit Log" comingIn="M4-24" />}
-              />
+              <Route path="/admin/audit" element={<AuditPage />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/desktops" replace />} />

@@ -460,13 +460,17 @@ export interface DashboardSummary {
 
 
 /**
- * One row from the broker's audit_log. Mirrors `AuditRead`.
+ * Mirror of `app.schemas.audit.AuditRead`.
  *
- * `details` is JSONB — typed as `Record<string, unknown> | null`
- * because the shape varies per action; consumers cast on a per-action
- * basis when they need to read specific fields.
+ * `id` is an int (the audit_log table uses BIGSERIAL, not UUID).
+ * Most other resources expose UUID ids; audit is the exception
+ * because the row count is unbounded and the int is cheaper.
+ *
+ * `actor`, `resource_type`, `resource_id`, `details`, `client_ip` are
+ * all nullable: system/worker actions have no actor; auth.login has
+ * no resource; a row with no extra context has empty details.
  */
-export interface AuditEntry {
+export interface AuditRead {
   id: number;
   timestamp: string;
   actor: string | null;
@@ -476,3 +480,7 @@ export interface AuditEntry {
   details: Record<string, unknown> | null;
   client_ip: string | null;
 }
+
+
+/** Alias retained for the M4-18 dashboard's recent-activity card. */
+export type AuditEntry = AuditRead;
