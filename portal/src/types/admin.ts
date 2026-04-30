@@ -77,6 +77,105 @@ export interface ClusterUpdate {
 }
 
 
+// ── Template ────────────────────────────────────────────────
+
+
+/**
+ * Mirror of `app.schemas.template.TemplateRead`.
+ *
+ * `os_type` is a plain string — M2 deliberately deferred enum
+ * narrowing. The form uses a select with the documented values
+ * (windows11, windows10, ubuntu24, rhel9) but the wire type stays
+ * permissive. M5+ may narrow on both sides simultaneously.
+ */
+export interface TemplateRead {
+  id: string;
+  cluster_id: string;
+  name: string;
+  pve_vmid: number;
+  pve_node: string;
+  os_type: string;
+  description: string | null;
+  cpu_cores: number;
+  memory_mb: number;
+  disk_gb: number;
+  gpu_required: boolean;
+  tags: unknown[];
+  provider_config: Record<string, unknown>;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+
+/** Mirror of `app.schemas.template.TemplateCreate`. */
+export interface TemplateCreate {
+  cluster_id: string;
+  name: string;
+  pve_vmid: number;
+  pve_node: string;
+  os_type: string;
+  description?: string | null;
+  cpu_cores?: number;
+  memory_mb?: number;
+  disk_gb?: number;
+  gpu_required?: boolean;
+  tags?: unknown[];
+  provider_config?: Record<string, unknown>;
+}
+
+
+/**
+ * Mirror of `app.schemas.template.TemplateUpdate`. All fields
+ * optional; omitted keys preserve existing values.
+ *
+ * Excludes cluster_id and pve_vmid — both are immutable post-creation
+ * (the (cluster, vmid) pair is the cross-cluster uniqueness key). The
+ * broker's PUT endpoint enforces this; the portal hides them.
+ */
+export interface TemplateUpdate {
+  name?: string;
+  pve_node?: string;
+  os_type?: string;
+  description?: string | null;
+  cpu_cores?: number;
+  memory_mb?: number;
+  disk_gb?: number;
+  gpu_required?: boolean;
+  tags?: unknown[];
+  provider_config?: Record<string, unknown>;
+}
+
+
+/** Mirror of `app.schemas.template.ValidationCheck`. */
+export interface ValidationCheck {
+  name: string; // "exists", "is_template", "agent_configured", etc.
+  passed: boolean;
+  message: string;
+}
+
+
+/** Mirror of `app.schemas.template.TemplateValidationResult`. */
+export interface TemplateValidationResult {
+  template_id: string;
+  passed: boolean;
+  checks: ValidationCheck[];
+}
+
+
+/**
+ * UI-only enum of supported os_type values. The broker stores plain
+ * string; this list is the form dropdown source. M5+ may narrow the
+ * wire type and consolidate.
+ */
+export const OS_TYPES = [
+  { value: "windows11", label: "Windows 11" },
+  { value: "windows10", label: "Windows 10" },
+  { value: "ubuntu24",  label: "Ubuntu 24.04" },
+  { value: "rhel9",     label: "RHEL 9" },
+] as const;
+
+
 // ── Dashboard summary ─────────────────────────────────────────
 
 

@@ -10,6 +10,8 @@ import {
   ClusterFormPage,
   ClustersPage,
   DashboardPage,
+  TemplateFormPage,
+  TemplatesPage,
 } from "@/pages/admin";
 import { AdminRoute } from "@/auth/AdminRoute";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
@@ -56,11 +58,14 @@ export default function App() {
                 path="/admin/clusters/:id/edit"
                 element={<ClusterFormPage />}
               />
+              <Route path="/admin/templates" element={<TemplatesPage />} />
               <Route
-                path="/admin/templates"
-                element={
-                  <AdminPlaceholder title="Templates" comingIn="M4-20" />
-                }
+                path="/admin/templates/new"
+                element={<TemplateFormPage />}
+              />
+              <Route
+                path="/admin/templates/:id/edit"
+                element={<TemplateFormPage />}
               />
               <Route
                 path="/admin/pools"
