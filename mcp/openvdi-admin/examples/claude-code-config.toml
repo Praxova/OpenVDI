@@ -1,0 +1,12 @@
+# Add to .claude/config.toml in your OpenVDI checkout (or globally
+# at ~/.claude/config.toml).
+
+[mcp.openvdi-admin]
+command = "openvdi-admin"
+
+[mcp.openvdi-admin.env]
+OPENVDI_BROKER_URL = "https://broker.example.com"
+OPENVDI_SERVICE_USER = "openvdi-mcp-svc"
+OPENVDI_SERVICE_PASSWORD = "replace-me-secret"
+OPENVDI_VERIFY_SSL = "true"
+OPENVDI_MCP_LOG_FORMAT = "json"
