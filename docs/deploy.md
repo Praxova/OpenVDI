@@ -200,6 +200,144 @@ Production deployments should set `OPENVDI_LOG_FORMAT=json`. The broker emits on
 
 Request-handling logs carry `request_id` (correlates entries from one HTTP request); worker logs carry `worker` (correlates entries from one worker tick). The middleware sets `X-Request-ID` on every response so frontend errors can be correlated to backend logs.
 
+## MCP Server Deployment
+
+The `openvdi-admin` MCP server runs on the agent's host, NOT alongside
+the broker. Common deployments:
+
+- **Operator's laptop** running Claude Desktop or Claude Code, MCP
+  spawned as a subprocess by the agent.
+- **Praxova IT Agent platform** instance, MCP hosted as a tool server.
+- **Headless CI runner** for OpenVDI scenario testing, MCP spawned by
+  test-runner Python.
+
+The MCP is stateless and pip-installable from the OpenVDI monorepo.
+Multiple MCP processes against the same broker are fine — they each
+hold an independent service-account session.
+
+### Service account creation
+
+Create a regular AD user (e.g. `openvdi-mcp-svc`) and add it to the
+group named in `OPENVDI_LDAP_ADMIN_GROUP`. The MCP authenticates exactly
+the way an admin user does from the portal — no new identity concept,
+no broker-side configuration.
+
+Per-agent attribution: if you want different agent products to be
+distinguishable in the broker's audit log, create separate AD service
+accounts per product (e.g. `openvdi-itagent-svc`, `openvdi-installer-svc`).
+The audit log's `actor` field will show which one acted.
+
+Rotate the password per your AD policy. Restart the MCP after rotation
+(no SIGHUP-driven config reload in v0; that's M6+).
+
+### Installation
+
+```bash
+git clone git@github.com:Praxova/OpenVDI.git
+cd OpenVDI/mcp/openvdi-admin
+pip install -e ".[dev]"
+```
+
+Python 3.10+ required (matches the broker's dev environment). The `mcp[cli]` SDK install can be slow on constrained hosts; if `pip install -e ".[dev]"` stalls, fall back to:
+
+```bash
+pip install --no-deps -e .
+pip install pytest pytest-asyncio respx ruff mypy  # dev deps
+pip install "mcp[cli]>=1.0.0"  # the actual SDK; let it complete in background
+```
+
+Verify with:
+
+```bash
+python -m openvdi_admin.server
+# Hangs waiting for MCP-protocol input on stdin. Ctrl-C to exit.
+```
+
+### Environment variables
+
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `OPENVDI_BROKER_URL` | yes | — | Same origin the portal uses, e.g. `https://openvdi.example.com` |
+| `OPENVDI_SERVICE_USER` | yes | — | AD username of the MCP service account |
+| `OPENVDI_SERVICE_PASSWORD` | yes | — | Service-account password (loaded as SecretStr; never logged) |
+| `OPENVDI_VERIFY_SSL` | no | `true` | Set `false` only for self-signed dev clusters |
+| `OPENVDI_MCP_READ_ONLY` | no | `false` | When `true`, every destructive tool refuses to execute |
+| `OPENVDI_MCP_LOG_FORMAT` | no | `text` | `text` (dev) or `json` (production) |
+| `OPENVDI_MCP_LOG_LEVEL` | no | `INFO` | Standard Python log level |
+| `OPENVDI_MCP_LOG_TOOL_STARTS` | no | `false` | If `true`, logs both tool start AND completion (2× volume) |
+
+The MCP refuses to start if any required variable is unset. Loading is fast-fail at module import.
+
+### Configuring the agent client
+
+For Claude Desktop, add the MCP to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openvdi-admin": {
+      "command": "openvdi-admin",
+      "env": {
+        "OPENVDI_BROKER_URL": "https://openvdi.example.com",
+        "OPENVDI_SERVICE_USER": "openvdi-mcp-svc",
+        "OPENVDI_SERVICE_PASSWORD": "...",
+        "OPENVDI_MCP_LOG_FORMAT": "json"
+      }
+    }
+  }
+}
+```
+
+For Claude Code, configure in `.claude/config.toml`:
+
+```toml
+[mcp.openvdi-admin]
+command = "openvdi-admin"
+
+[mcp.openvdi-admin.env]
+OPENVDI_BROKER_URL = "https://openvdi.example.com"
+OPENVDI_SERVICE_USER = "openvdi-mcp-svc"
+OPENVDI_SERVICE_PASSWORD = "..."
+```
+
+For the Praxova IT Agent platform, see the IT Agent's own deployment docs — the OpenVDI MCP integrates as a tool server using the same env vars.
+
+### Logging and correlation
+
+The MCP emits one log line per tool completion to stderr (stdout is reserved for the MCP protocol). With `OPENVDI_MCP_LOG_FORMAT=json`, each line is a structured JSON record:
+
+```json
+{
+  "timestamp": "2026-04-30T14:22:18.450Z",
+  "level": "INFO",
+  "logger": "openvdi_admin._tool_wrapper",
+  "message": "tool completed",
+  "tool": "openvdi_create_pool",
+  "request_id": "9f1a2c3d-...",
+  "outcome": "ok",
+  "duration_ms": 82,
+  "result_envelope_ok": null
+}
+```
+
+The MCP propagates `request_id` to the broker via the `X-Request-ID` header. The broker's M4-12 logging (when `OPENVDI_LOG_FORMAT=json`) includes `request_id` on every line. To trace a problem end-to-end:
+
+1. Find the MCP log line for the failing tool call. Note `request_id`.
+2. `grep <request_id> /var/log/openvdi/broker.log` — finds every broker-side line for that request.
+3. `psql -c "SELECT * FROM audit_log WHERE details->>'request_id' = '<rid>';"` — finds the audit row for the action.
+
+Tool args are NOT logged on the MCP side. They appear in the broker's audit log with sensitive fields redacted per M2-12.
+
+### Read-only mode
+
+For diagnostic-only deployments (e.g. an IT Agent that should only investigate, never mutate), set `OPENVDI_MCP_READ_ONLY=true`. Every destructive tool — every `create`, `update`, `delete`, `power`, `provision`, `drain`, `rebuild`, `assign`, `unassign`, `force_disconnect`, `grant`, `revoke`, plus the destructive intent tools — returns a structured `READ_ONLY_MODE` error instead of executing.
+
+Granular per-tool tiers (e.g. "diagnostic + power, no delete") are M6+; v0 is binary.
+
+### Audit attribution
+
+Every action the MCP triggers shows up in the broker's `audit_log` attributed to the service-account username. If a customer wants to distinguish "Bob via the agent" from "the agent acting on its own schedule," that's a policy concern for the agent's own logs, not the MCP's. The audit row carries `request_id` to correlate with the agent's session.
+
 ## Backup and Recovery
 
 **Postgres dump nightly minimum.** OpenVDI's database is the source of truth for everything except live VM state. A clean restore + broker restart is a complete recovery — the brokers reconstruct provider instances from the `clusters` table on startup and the workers rebuild operational state from there.
@@ -216,6 +354,12 @@ Recovery procedure:
 5. Validate via `GET /health` and a `POST /auth/login` round-trip.
 
 VMs themselves are not backed up by OpenVDI — that's the hypervisor's concern. The Proxmox provider's `destroy_vm` is the only OpenVDI-driven destructive operation; admin DELETE flows are auditable in `audit_log`.
+
+**MCP servers have no state.** No backup concern. The MCP's only
+configuration is environment variables (handled by your secrets
+manager) and the OpenVDI monorepo (handled by source control). A clean
+restart of an MCP process is fully self-recovering — it logs back in
+on the first tool call.
 
 ## Health and Monitoring
 

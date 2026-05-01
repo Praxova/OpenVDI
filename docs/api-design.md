@@ -4,6 +4,15 @@
 
 FastAPI REST API serving both the admin dashboard and user-facing web portal. JWT-based authentication with AD/LDAP backend. All endpoints under `/api/v1`.
 
+**Primary consumers.** The admin endpoints documented below are consumed
+by the React portal (M3/M4) and the `openvdi-admin` MCP server (M5).
+Both authenticate via the same JWT mechanism described in the
+*Authentication* section. The MCP wraps every admin endpoint as a
+thin tool (`openvdi_<verb>_<resource>`); see `docs/mcp.md` for the
+catalog. The `/me/*` user endpoints are consumed only by the portal —
+the MCP uses the admin equivalents (e.g. `/admin/users/{username}/desktops`)
+to operate on behalf of arbitrary users.
+
 ## Authentication
 
 OpenVDI uses JWT-based authentication backed by LDAP/AD. Three endpoints under `/api/v1/auth` constitute the auth surface. All other endpoints require a valid access token in the `Authorization: Bearer <token>` header (per the M4 middleware).

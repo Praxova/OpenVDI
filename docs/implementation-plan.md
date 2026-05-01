@@ -103,6 +103,42 @@ OpenVDI/
 │   └── public/
 │       └── novnc/                   # noVNC static assets
 │
+├── mcp/                             # MCP servers
+│   └── openvdi-admin/                # Operational MCP for agents
+│       ├── pyproject.toml
+│       ├── README.md
+│       ├── src/openvdi_admin/
+│       │   ├── server.py            # FastMCP entry point
+│       │   ├── auth.py              # BrokerAuthClient
+│       │   ├── client.py            # BrokerClient (verb helpers)
+│       │   ├── config.py            # pydantic-settings
+│       │   ├── errors.py            # BrokerError + envelope unwrap
+│       │   ├── logging.py           # text/json formatter
+│       │   ├── _request_context.py  # ContextVar for request_id
+│       │   ├── _tool_wrapper.py     # @register_tool decorator
+│       │   ├── tools/               # 37 thin wrappers
+│       │   │   ├── _common.py
+│       │   │   ├── _polling.py
+│       │   │   ├── clusters.py
+│       │   │   ├── templates.py
+│       │   │   ├── entitlements.py
+│       │   │   ├── pools.py
+│       │   │   ├── dashboard.py
+│       │   │   ├── audit.py
+│       │   │   ├── desktops.py
+│       │   │   ├── sessions.py
+│       │   │   └── user_diagnostics.py
+│       │   └── intent/              # 6 intent tools
+│       │       ├── _result.py       # IntentResult + StepTracker
+│       │       ├── smoke_test.py
+│       │       ├── deploy_pool.py
+│       │       ├── reset_environment.py
+│       │       ├── diagnose_user.py
+│       │       ├── diagnose_pool.py
+│       │       └── health_check.py
+│       ├── tests/
+│       └── examples/                # client config snippets
+│
 ├── db/                              # Database scripts
 │   ├── 001_schema.sql               # Initial schema (from database-schema.md)
 │   ├── 002_seed_data.sql            # Dev seed data
@@ -423,20 +459,72 @@ KasmVNC display protocol, WAN reverse proxy, code-splitting, real-time portal up
 
 **Tag:** `m4-complete`
 
-### Milestone 5+ — Polish and Extend
+### Milestone 5 — MCP server (Shipped 2026-04-30)
+
+**Goal.** Ship `openvdi-admin`, an MCP server that exposes the OpenVDI
+broker to AI agents. The MCP is the GTM lever: the broker stays free
+and open source, paid agents drive it. Required for the beta release
+because the IT Agent integration and customer installer agents depend
+on it.
+
+**Deliverables:**
+
+- Broker prep — new admin endpoints `GET /admin/users/{username}/desktops`
+  and `GET /admin/users/{username}/sessions` (M5-01).
+- MCP package scaffold + auth client (M5-02). Lazy login, refresh-cookie
+  handling, concurrent-refresh dedup, 401-replay.
+- 37 thin-wrapper tools (M5-03/04/05). Naming: `openvdi_<verb>_<resource>`.
+  Every admin endpoint surfaced. Read-only mode + confirm pattern on
+  destructive tools.
+- 6 intent tools (M5-06/07). `openvdi_smoke_test`,
+  `openvdi_deploy_pool`, `openvdi_reset_test_environment`,
+  `openvdi_diagnose_user`, `openvdi_diagnose_pool`,
+  `openvdi_health_check`. Composed from thin wrappers.
+- Logging + observability (M5-08). JSON formatter, per-tool log lines,
+  `X-Request-ID` propagation to broker.
+- Documentation + acceptance (M5-09). `docs/mcp.md`, README, example
+  client configs, acceptance script.
+
+**Validation:**
+
+1. All 43 tools register and respond.
+2. Test suite passes: ~280+ unit tests across MCP source.
+3. Manual scenario: deploy pool from nothing, verify, simulate user
+   logon, simulate logoff, tear down — all driven via MCP tools.
+4. Cross-system log correlation: one `X-Request-ID` UUID grep-able
+   across MCP stderr and broker structured logs.
+5. Acceptance script runs the full M5 catalog end-to-end.
+
+**Out of scope for v0 (deferred to M6+):**
+
+- `openvdi-installer` MCP (new-customer onboarding from bare Proxmox).
+- Pass-through user JWTs (MCP currently uses service-account auth only).
+- Streaming progress for long ops (MCP transport is request/response).
+- Multi-cluster orchestration intent tools.
+- MCP-side audit log (broker audit covers it).
+- MCP rate limiting.
+- MCP packaging as Docker image (pip-install from monorepo for now).
+
+**Tag:** `m5-complete`
+
+### Milestone 6+ — Polish and Extend
 
 - Audit logging middleware
-- Pool drain / maintenance mode
-- Desktop rebuild (destroy + re-clone preserving assignment)
-- Template validation endpoint (verify agent installed, is template, snapshot OK)
-- Health checker worker
+- Pool drain / maintenance mode (already shipped in M2/M4 — review whether this row is stale)
+- Desktop rebuild (destroy + re-clone preserving assignment) — *shipped in M5-05*
+- Template validation endpoint — *shipped in M5-03*
+- Health checker worker — *shipped in M4*
 - Capacity dashboard with per-provider node metrics
 - Error recovery (stuck desktops, orphan VMs)
 - Multi-node placement logic (least-loaded node selection)
-- `docker-compose.yml` for full stack (Postgres + broker + portal)
+- `docker-compose.yml` for full stack (Postgres + broker + portal + MCP)
 - Comprehensive error handling and user-friendly error messages
 - Rate limiting on broker endpoints
 - Second provider implementation (vSphere or XCP-ng, when a customer or validation partner materializes)
+- `openvdi-installer` MCP for new-customer onboarding
+- Pass-through user JWT mode for the operational MCP
+- Streaming progress for long-running intent tools
+- Cross-MCP correlation when 2+ Praxova MCPs run alongside (IT Agent stack)
 
 ## noVNC Integration Notes
 
@@ -527,3 +615,31 @@ npm run dev
 | Connect-button always enabled regardless of pool status | Pool state at launcher-paint time can be stale within seconds. StatusBadge communicates state honestly; broker is the source of truth on whether a click succeeds. M3-06 surfaces 503/409 inline | 2026-04-27 |
 | Discriminated-union ticket type with single v0 renderer | `ConsoleTicket = NoVNCTicket | WebMKSTicket | SpiceTicket | RDPTicket`. v0 produces `novnc` only; the union shape lets future renderers (KasmVNC v1) drop in without a backend change | 2026-04-27 |
 | Playwright canvas assertion is dimensional, not visual | Pixel content varies every connection (cursor blink, idle wallpaper, etc). Canvas-exists + non-zero w/h + transitive RFB.connect proof via toolbar status is the right signal for the smoke gate | 2026-04-27 |
+| F1: Operational MCP only this milestone (no installer MCP) | Two MCPs have different threat models, lifetimes, and auth stories; bundling would muddy both. Installer-MCP design deserves its own session | 2026-04-30 |
+| F2: Thin-wrapper-first, intent tools layer on top | LLMs compose well; intent tools earn their keep when domain knowledge needs to be baked in. Forces "change the wrapper, intent tools get it for free" | 2026-04-30 |
+| F3: Service-account auth only (no pass-through JWTs in v0) | Pass-through is M6+ if real users ask. Service-account model is simpler and matches what most agent products will use | 2026-04-30 |
+| F5: Use `mcp[cli]` SDK from Anthropic, not standalone `fastmcp` | Aligns with `pve-spec-query`; one toolchain across Praxova MCPs reduces cognitive load | 2026-04-30 |
+| A1: Service account is a regular AD admin user | No new identity concept introduced; broker stays unchanged. Audit attribution falls naturally to the AD user the agent operates as | 2026-04-30 |
+| A2: Lazy login on first tool call | MCP startup happens at agent-host boot; broker may not be reachable yet. Lazy avoids spurious startup failures | 2026-04-30 |
+| A5: Concurrent refresh dedup via in-flight promise pattern | Intent tools fan out (e.g. diagnose_pool issues 4-5 concurrent thin-wrapper calls); one mass-401 without dedup = 4-5 logins in parallel | 2026-04-30 |
+| S1: Read-only mode via `OPENVDI_MCP_READ_ONLY` env var | Diagnostic-only deployments need a single switch. Granular per-tool tiers are M6+ via IT Agent's policy layer | 2026-04-30 |
+| S2: Dry-run/confirm pattern on every destructive tool | Forces deliberate two-step choice; human supervisor sees the `confirm=True` parameter in the tool call audit | 2026-04-30 |
+| S3: Error envelope unwrapped to structured fields | Lets agents branch on `error_code` programmatically without parsing strings. Intent tools return `{ok, error_code, ...}` envelopes; thin wrappers raise BrokerError | 2026-04-30 |
+| S4: No silent retries inside MCP tools | Broker handles its own retries; double-retry would mask real failures and burn rate budget | 2026-04-30 |
+| T2: Single `openvdi_power_desktop` with `action` parameter (not 4 separate tools) | Mirrors M4-22 portal pattern. LLMs handle the `action` parameter naturally; aliases would be redundant | 2026-04-30 |
+| T4: Intent tools compose thin wrappers, never call broker directly | Forced refactoring: change a wrapper, intent tools that use it pick up the change for free. No code duplication | 2026-04-30 |
+| T6: Long-running operations poll + return final state | Agent sees one synchronous-looking call. Better UX than 202-Accepted with separate polling tools at v0 | 2026-04-30 |
+| B1: New admin endpoints `GET /admin/users/{username}/{desktops,sessions}` | Closes the "diagnose Alice's connection" gap so MCP doesn't have to reason over `/sessions?username=alice` + entitlements join | 2026-04-30 |
+| B4: 200 empty-list (not 404) for unknown usernames | Broker has no canonical user-existence check that doesn't reach LDAP. "User has nothing" is the same useful answer as "user doesn't exist" | 2026-04-30 |
+| C3: Single FastMCP server instance, tools register via decorator side effects | Standard FastMCP pattern; tool modules import → decorators execute → tools live on the singleton | 2026-04-30 |
+| C4: Single shared `BrokerClient` singleton | One auth state, one connection pool. Per-tool clients would multiply auth state and break the refresh dedup pattern | 2026-04-30 |
+| C7: No persistent state in MCP | All operational state lives in the broker. MCP restartable at any time. Backup discussion vanishes | 2026-04-30 |
+| C8: JSON-or-text logging via `OPENVDI_MCP_LOG_FORMAT`, mirrors broker M4-12 | Operators get one log shape across MCP and broker. `X-Request-ID` propagates so cross-system grep works | 2026-04-30 |
+| C9: stdio transport in v0 (no HTTP/SSE) | Standard FastMCP shape; MCP client (Claude Desktop, Code, IT Agent) spawns the MCP as subprocess. HTTP transport M6+ | 2026-04-30 |
+| `IntentResult` + `StepTracker` shape | Per-step timing, structured failure with `failed_at_step` + `rollback_hint`. Agents get a consistent envelope across all 6 intent tools | 2026-04-30 |
+| `last_failed_step()` as public method (vs. underscore access) | The "raise inside the step context" pattern is enforced by structure when the lookup is a real method — accidentally raising outside a step shows up as `failed_at_step="unknown"` immediately | 2026-04-30 |
+| `wait_for_pool_terminal_state` uses sessions-only signal for drain | Drain is one-way: broker transitions `active → draining` and stops there. Polling for `disabled` would loop forever | 2026-04-30 |
+| `BrokerClient.get_raw()` for non-envelope endpoints | `/health` deliberately bypasses the `{data, error}` envelope (M4-12) so it's reachable in degraded states. Separate accessor avoids polluting the standard `get()` | 2026-04-30 |
+| `@register_tool()` decorator combines `@mcp.tool()` + `@instrument_tool` | Logging instrumentation applied uniformly; new tools added in M6+ get observability for free | 2026-04-30 |
+| Don't log tool args, ever | Args may contain secrets (passwords, token secrets); redaction logic is brittle. Broker `audit_log` already has redacted args. Operators correlate via `X-Request-ID` | 2026-04-30 |
+| `OPENVDI_MCP_LOG_TOOL_STARTS=false` default | Volume increases 2× otherwise; operators tune up when debugging, not by default | 2026-04-30 |

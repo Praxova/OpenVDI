@@ -40,16 +40,23 @@ Persistent and non-persistent pools use the same clone mechanism. The difference
 ## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────┐
-```
-│  Web Portal (React)                                 │
-│  - User desktop launcher                            │
-│  - Console renderer (noVNC in v0; extensible)       │
-│  - Admin dashboard                                  │
-└──────────────────┬──────────────────────────────────┘
-                   │ REST API (JWT auth)
-┌──────────────────▼──────────────────────────────────┐
-│  OpenVDI Broker (FastAPI)                           │
+┌─────────────────────────────────────┐  ┌──────────────────────────────────┐
+│  Web Portal (React)                 │  │  AI Agents                       │
+│  - User desktop launcher            │  │  (Claude Desktop / Code,         │
+│  - Console renderer (noVNC v0)      │  │   Praxova IT Agent, custom)      │
+│  - Admin dashboard                  │  │                                  │
+└──────────────────┬──────────────────┘  └──────────────┬───────────────────┘
+                   │ REST API (JWT)                      │ MCP protocol (stdio)
+                   │                            ┌────────▼────────────────────┐
+                   │                            │  openvdi-admin MCP server   │
+                   │                            │  (mcp/openvdi-admin/)       │
+                   │                            │  - 37 thin-wrapper tools    │
+                   │                            │  - 6 intent tools           │
+                   │                            └────────┬────────────────────┘
+                   │                                     │ REST API (JWT,
+                   │                                     │  service-account auth)
+┌──────────────────▼─────────────────────────────────────▼──────────────────────┐
+│  OpenVDI Broker (FastAPI)                                                     │
 │                                                     │
 │  ┌──────────┐ ┌──────────┐ ┌─────────────────────┐ │
 │  │ Auth     │ │ Pool Mgr │ │ Session Manager     │ │
@@ -122,6 +129,76 @@ Persistent and non-persistent pools use the same clone mechanism. The difference
 - **v0 (MVP):** noVNC via the hypervisor's native WebSocket VNC proxy (on Proxmox, the `vncproxy` endpoint). LAN-only, browser-based, no client install. Providers that cannot natively produce a noVNC-compatible WebSocket (e.g. Hyper-V) are out of scope for v0.
 - **v1:** KasmVNC (GPLv2, WebRTC transport, NVENC support). WAN-capable, better compression. Runs inside the VM template, so it becomes less provider-dependent.
 - **v2:** Custom protocol, deep KasmVNC fork, or RDP-via-Guacamole bridge if specific requirements emerge.
+
+## MCP Surface
+
+OpenVDI exposes a Model Context Protocol (MCP) server — `openvdi-admin` —
+that AI agents use to drive the broker. The MCP is the productization
+layer: the broker stays free and open source, paid agents (Praxova IT
+Agent, custom installer agents) are where Praxova captures value.
+
+The MCP is operational, not in the data path. Every MCP tool call
+becomes one or more REST requests to the broker; broker responses flow
+back to the agent. If the MCP goes down, agents lose their tool surface
+but the broker, portal, and existing sessions are unaffected.
+
+### Layering
+
+```
+AI Agent ─MCP protocol→ openvdi-admin MCP ─REST(JWT)→ Broker ─→ Hypervisor
+```
+
+The MCP is sibling to the portal in dependency posture: both consume the
+broker's REST API; neither talks to the hypervisor directly. Adding a
+second hypervisor provider (vSphere, Hyper-V) would require no MCP
+changes — the MCP wraps broker endpoints, not provider endpoints.
+
+### Tool catalog
+
+Two layers, ~43 tools total:
+
+- **37 thin wrappers** — one per admin endpoint. Naming: `openvdi_<verb>_<resource>` (e.g. `openvdi_list_clusters`, `openvdi_create_pool`, `openvdi_power_desktop`). Thin wrappers can do everything the broker can do.
+- **6 intent tools** — composed from thin wrappers; bake in domain knowledge for high-value workflows: `openvdi_smoke_test`, `openvdi_deploy_pool`, `openvdi_diagnose_user`, `openvdi_diagnose_pool`, `openvdi_health_check`, `openvdi_reset_test_environment`.
+
+Intent tools NEVER call the broker directly — they go through the thin
+wrappers. This guarantees that improvements to a thin wrapper propagate
+to every intent tool that uses it.
+
+### Authentication
+
+The MCP authenticates as a regular AD service account that's a member
+of `OPENVDI_LDAP_ADMIN_GROUP`. No new "service account" concept — it
+authenticates exactly the way an admin user does from the portal. The
+broker's audit log attributes every action to the service account; if
+the operator wants per-agent attribution, they configure separate AD
+service accounts per agent product.
+
+### Safety posture
+
+Every destructive tool defaults to a dry-run preview (`confirm=False`);
+the agent must explicitly pass `confirm=True` to execute. The MCP also
+honors a global `OPENVDI_MCP_READ_ONLY=true` env switch that blocks
+every destructive tool — useful for diagnostic-only deployments.
+
+The MCP has no persistent state and no audit log of its own. The
+broker's audit log is the audit trail; agents are correlated via
+`X-Request-ID` headers so operators can grep one UUID across MCP and
+broker log streams.
+
+### Productization
+
+The MCP itself is GPLv3 and stays free during beta. The agents that
+drive it (Praxova IT Agent's OpenVDI tool server, customer installer
+agents) are where Praxova charges. Customers running their own agent
+on top of the MCP pay nothing for the MCP layer.
+
+### Scope
+
+v0 ships the operational MCP only — the running-broker case. A separate
+`openvdi-installer` MCP for new-customer onboarding (operator
+prerequisites, service account creation, broker bring-up) is M6+ work.
+The two MCPs have different threat models and authentication stories
+that deserve separate design.
 
 ## Key Technical Risks
 
