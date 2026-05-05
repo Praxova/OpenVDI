@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "openvdi-admin"
 version = "0.5.0"
 description = "MCP server for operating an OpenVDI broker."
-authors = [{name = "Praxova", email = "alton@praxova.com"}]
+authors = [{name = "Praxova", email = "alton@praxova.ai"}]
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
