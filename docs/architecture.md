@@ -187,7 +187,8 @@ broker log streams.
 
 ### Productization
 
-The MCP itself is GPLv3 and stays free during beta. The agents that
+The MCP itself is Apache 2.0 (matching the OpenVDI broker and
+Praxova's IT Agent) and stays free during beta. The agents that
 drive it (Praxova IT Agent's OpenVDI tool server, customer installer
 agents) are where Praxova charges. Customers running their own agent
 on top of the MCP pay nothing for the MCP layer.

@@ -9,7 +9,7 @@ description = "MCP server for operating an OpenVDI broker."
 authors = [{name = "Praxova", email = "alton@praxova.com"}]
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "GPL-3.0-or-later"}
+license = {text = "Apache-2.0"}
 # Aligned with pve-spec-query's MCP package choice — both use the
 # official MCP Python SDK (`mcp[cli]`) which bundles the FastMCP
 # wrapper at `mcp.server.fastmcp`. Mixing two MCP packages

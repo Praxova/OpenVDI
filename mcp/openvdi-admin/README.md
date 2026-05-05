@@ -258,8 +258,11 @@ them.
 
 ## License
 
-GPL-3.0-or-later (per `pyproject.toml`). Praxova captures revenue at
-the agent layer, not the MCP layer.
+Apache-2.0 (per `pyproject.toml`, matching the project-root
+`LICENSE`). Praxova captures revenue at the agent layer, not the
+MCP layer; permissive licensing on the broker + MCP keeps the
+foundation friction-free for customer extension and aligns with the
+license used by Praxova's IT Agent.
 
 ## See also
 

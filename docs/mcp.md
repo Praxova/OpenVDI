@@ -60,8 +60,8 @@ returns structured data the agent can reason about.
 | **Praxova IT Agent platform** | Hosts the openvdi-admin MCP as a tool server. Customers running Praxova IT Agent can manage their OpenVDI deployment by talking to the agent. |
 | **Direct AI tools** (Claude Desktop, Claude Code) | An OpenVDI operator runs the MCP as a subprocess of their AI assistant. Useful for one-off diagnosis, scenario testing, or scripting deployments. |
 
-The MCP itself is GPLv3 and stays free. The agents that drive it are
-where Praxova captures revenue.
+The MCP itself is Apache 2.0 and stays free. The agents that drive
+it are where Praxova captures revenue.
 
 ---
 
