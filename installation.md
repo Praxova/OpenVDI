@@ -273,7 +273,87 @@ IT Agent, etc.) via the MCP server, create a SECOND AD user (e.g.
 `openvdi-mcp-svc`) and add it to `OpenVDI-Admins`. See `docs/mcp.md`
 for the rationale.
 
-### 3.4 Verify the bind account
+### 3.4 Trust the AD certificate authority (if your Ubuntu host doesn't already trust it)
+
+**If your Ubuntu host does not trust your DC as a certificate
+authority, do this first.** Most enterprise deployments use a
+private / internal CA to sign the AD's LDAPS certificate; that CA
+is unlikely to be in Ubuntu's default trust store, and the broker
+(plus `ldapsearch` in 3.5) will fail the TLS handshake before any
+bind happens.
+
+Quick test — does the host already trust the chain?
+
+```bash
+sudo apt install -y openssl
+openssl s_client -connect dc1.example.com:636 \
+  -servername dc1.example.com </dev/null 2>&1 | grep "Verify return"
+```
+
+- `Verify return code: 0 (ok)` → the host already trusts the
+  chain. Skip the rest of 3.4 and go to 3.5.
+- `Verify return code: 21 (unable to verify the first certificate)`
+  (or any non-zero code) → the host doesn't trust the chain. Keep
+  going.
+
+#### Obtain the issuing CA certificate
+
+You need the **issuing CA's** certificate, not the DC's own cert.
+Two ways:
+
+**(a) From your AD administrator.** Ask for the internal root CA's
+PEM file. This is the cleanest path — a public-key file, no
+secrets, safe to email or drop into a config repo.
+
+**(b) Extract from the live LDAPS handshake.** Works when the AD
+presents the full chain on the wire:
+
+```bash
+openssl s_client -connect dc1.example.com:636 \
+  -servername dc1.example.com -showcerts </dev/null 2>/dev/null \
+  | awk '/-----BEGIN CERT/,/-----END CERT/' \
+  > /tmp/ad-chain.pem
+```
+
+`/tmp/ad-chain.pem` will contain one or more certificate blocks.
+The **last** `-----BEGIN CERTIFICATE-----` ... `-----END
+CERTIFICATE-----` block is the issuing CA. Copy it into its own
+file:
+
+```bash
+# Manually edit /tmp/ad-chain.pem to keep only the last block,
+# saving as /tmp/ad-ca.crt — or:
+csplit -f /tmp/ad-cert- -b '%02d.crt' /tmp/ad-chain.pem \
+  '/-----BEGIN CERTIFICATE-----/' '{*}' >/dev/null
+ls /tmp/ad-cert-*.crt   # last one is the issuing CA
+cp "$(ls /tmp/ad-cert-*.crt | tail -1)" /tmp/ad-ca.crt
+```
+
+If the AD only presents its leaf cert (no chain) this method won't
+work — use option (a).
+
+#### Import into Ubuntu's trust store
+
+```bash
+sudo cp /tmp/ad-ca.crt /usr/local/share/ca-certificates/ad-ca.crt
+sudo chmod 644 /usr/local/share/ca-certificates/ad-ca.crt
+sudo update-ca-certificates
+```
+
+The final command should print something ending in `1 added` (or
+more if you imported intermediates as well). Verify:
+
+```bash
+openssl s_client -connect dc1.example.com:636 \
+  -servername dc1.example.com </dev/null 2>&1 | grep "Verify return"
+# Should now print: Verify return code: 0 (ok)
+```
+
+The same OS trust store is what Python's `ssl` and the broker's
+`ldap3` consult — once `update-ca-certificates` succeeds here,
+broker-side LDAPS will work too with no extra config.
+
+### 3.5 Verify the bind account
 
 From the OpenVDI host, after installing `ldap-utils`:
 
@@ -292,7 +372,9 @@ ldapsearch -x \
 You should see your user record. If `ldapsearch` errors with
 `Can't contact LDAP server`, check firewall rules and DNS. If it
 errors with `Invalid credentials`, the bind DN or password is
-wrong.
+wrong. If it errors with TLS verification messages (`tls_write:
+error:...certificate verify failed`), revisit 3.4 — the CA isn't
+trusted yet.
 
 ---
 
