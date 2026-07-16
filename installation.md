@@ -461,6 +461,23 @@ If `node -v` still reports v18, apt is preferring the distro package:
 `sudo apt remove -y nodejs npm && sudo apt autoremove -y`, then re-run
 the NodeSource steps above.
 
+**If `pnpm -v` reports 11.x despite the `@10`**, you have two pnpm
+installs and the wrong one is winning. This happens on any host that
+previously installed pnpm under apt's `npm`: apt's npm uses a global
+prefix of `/usr/local`, NodeSource's uses `/usr`, and `/usr/local/bin`
+comes first in a default PATH — so an old `/usr/local` pnpm shadows the
+new one. `apt remove npm` does not clean it, because npm's global
+packages aren't apt-managed.
+
+```bash
+which -a pnpm    # two or more hits → that's the problem
+
+sudo rm -rf /usr/local/bin/pnpm /usr/local/bin/pnpx \
+            /usr/local/lib/node_modules/pnpm
+hash -r          # bash caches resolved paths; clear it
+pnpm -v          # → 10.x
+```
+
 ### 5.2 Create the openvdi user
 
 ```bash
