@@ -335,7 +335,7 @@ work — use option (a).
 #### Import into Ubuntu's trust store
 
 ```bash
-sudo cp /tmp/ad-ca.crt /usr/local/share/ca-certificates/ad-ca.crt
+sudo cp /tmp/ad-ca.pem /usr/local/share/ca-certificates/ad-ca.crt
 sudo chmod 644 /usr/local/share/ca-certificates/ad-ca.crt
 sudo update-ca-certificates
 ```
@@ -468,7 +468,27 @@ GRANT ALL ON SCHEMA public TO openvdi;
 SQL
 ```
 
-### 6.2 Run the schema migrations
+### 6.2 Verify the database exists
+
+```bash
+sudo -u postgres psql -c '\l' | grep openvdi
+```
+
+The **schema** is created later, in Stage 7.4. Alembic loads the
+broker's settings module to find its DSN, so the broker's `.env` has
+to exist before migrations can run — config comes first, then schema.
+
+---
+
+## Stage 7 — Configure and install the broker
+
+Order matters in this stage. Alembic's `env.py` imports the broker's
+`Settings` object, which validates the **entire** configuration — not
+just the Postgres fields. An incomplete `.env` fails migration with a
+`ValidationError` listing every missing field. So: venv, then secrets,
+then `.env`, then migrate.
+
+### 7.1 Create the virtualenv
 
 ```bash
 sudo -u openvdi -i
@@ -478,44 +498,11 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-The broker reads its DB connection string from `.env` (which doesn't
-exist yet). Create a temporary one for migration:
+### 7.2 Generate secrets
 
-```bash
-cat > /opt/openvdi/OpenVDI/.env.migrate <<'EOF'
-POSTGRES_USER=openvdi
-POSTGRES_PASSWORD=openvdi
-POSTGRES_DB=openvdi
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-EOF
-
-# Alembic reads broker/alembic.ini which uses the env vars above.
-cd /opt/openvdi/OpenVDI/broker
-ENV_FILE=/opt/openvdi/OpenVDI/.env.migrate alembic upgrade head
-```
-
-### 6.3 Verify
-
-```bash
-psql "postgresql://openvdi:openvdi@localhost/openvdi" -c '\dt'
-```
-
-You should see ~10 tables (`clusters`, `templates`, `pools`,
-`desktops`, `sessions`, `entitlements`, `audit_log`, etc.) plus
-`alembic_version`.
-
-The raw-SQL files under `db/` are historical; Alembic is the
-canonical migration path. See `broker/README.md` → *Database
-migrations*.
-
----
-
-## Stage 7 — Configure and install the broker
-
-### 7.1 Generate secrets
-
-The broker needs three secrets:
+Two secrets are generated here. You'll also need the Proxmox API
+token secret from Stage 2.1 and the LDAP bind password from Stage 3.2
+— have both to hand before writing the `.env` in 7.3.
 
 ```bash
 cd /opt/openvdi/OpenVDI/broker
@@ -536,13 +523,26 @@ key means losing all stored cluster credentials (you'll have to
 re-enter them after a restore). Losing the JWT secret invalidates
 in-flight access tokens (less critical — users just re-login).
 
-### 7.2 Write the real `.env`
+### 7.3 Write the `.env`
 
-Replace `/opt/openvdi/OpenVDI/.env.migrate` (the migration-only file)
-with the production `.env`:
+Every value below marked `<...>` needs replacing with yours. The
+`PROXMOX_*`, `POSTGRES_*`, `OPENVDI_ENCRYPTION_KEY`, and — because
+`OPENVDI_AUTH_MODE=jwt` — the `OPENVDI_JWT_SECRET`, `OPENVDI_LDAP_*`,
+and `OPENVDI_PORTAL_ORIGIN` values are all **required**; the broker
+refuses to construct its settings without them.
 
 ```bash
 cat > /opt/openvdi/OpenVDI/.env <<EOF
+# Proxmox provider (token from Stage 2.1)
+PROXMOX_API_URL=https://<pve-host>:8006
+PROXMOX_TOKEN_ID=openvdi@pve!openvdi
+PROXMOX_TOKEN_SECRET=<your-token-secret>
+PROXMOX_VERIFY_SSL=false
+PROXMOX_DEFAULT_NODE=<your-pve-node-name>
+PROXMOX_TEMPLATE_VMID=<template-vmid-from-stage-4>
+PROXMOX_TEST_VMID=9999
+PROXMOX_TARGET_STORAGE=
+
 # Postgres
 POSTGRES_USER=openvdi
 POSTGRES_PASSWORD=openvdi
@@ -557,7 +557,7 @@ OPENVDI_ENCRYPTION_KEY=${ENC_KEY}
 OPENVDI_AUTH_MODE=jwt
 OPENVDI_JWT_SECRET=${JWT_SECRET}
 
-# LDAP / AD
+# LDAP / AD (bind account from Stage 3.2, admin group from Stage 3.1)
 OPENVDI_LDAP_URL=ldaps://dc1.example.com:636
 OPENVDI_LDAP_BIND_DN=CN=openvdi-svc,OU=ServiceAccounts,DC=example,DC=com
 OPENVDI_LDAP_BIND_PASSWORD=<your-bind-password>
@@ -577,16 +577,49 @@ OPENVDI_LOG_LEVEL=INFO
 OPENVDI_AUDIT_RETENTION_DAYS=90
 EOF
 
-rm -f /opt/openvdi/OpenVDI/.env.migrate
 chmod 600 /opt/openvdi/OpenVDI/.env
 chown openvdi:openvdi /opt/openvdi/OpenVDI/.env
 ```
+
+The `.env` **must** live at the repo root
+(`/opt/openvdi/OpenVDI/.env`). The broker resolves that path relative
+to its own module location — there is no env var to point it
+elsewhere.
+
+The `PROXMOX_*` values here are the provider defaults used by the
+acceptance test; the cluster you register in Stage 11 stores its own
+credentials in the database, encrypted with `OPENVDI_ENCRYPTION_KEY`.
 
 The full env-var reference (with descriptions and defaults) lives in
 `/opt/openvdi/OpenVDI/.env.example` and `docs/deploy.md` →
 *Environment Variables*.
 
-### 7.3 Smoke-test the broker manually
+### 7.4 Run the schema migrations
+
+```bash
+cd /opt/openvdi/OpenVDI/broker
+source .venv/bin/activate
+alembic upgrade head
+```
+
+If this fails with `ValidationError: N validation errors for
+Settings`, the `.env` is missing the listed fields — go back to 7.3.
+
+### 7.5 Verify the schema
+
+```bash
+psql "postgresql://openvdi:openvdi@localhost/openvdi" -c '\dt'
+```
+
+You should see ~10 tables (`clusters`, `templates`, `pools`,
+`desktops`, `sessions`, `entitlements`, `audit_log`, etc.) plus
+`alembic_version`.
+
+The raw-SQL files under `db/` are historical; Alembic is the
+canonical migration path. See `broker/README.md` → *Database
+migrations*.
+
+### 7.6 Smoke-test the broker manually
 
 ```bash
 sudo -u openvdi -i
@@ -609,7 +642,7 @@ errors at first login attempt, fix `OPENVDI_LDAP_*` and restart.
 
 `Ctrl-C` to stop. Now switch to running it under systemd.
 
-### 7.4 Install the systemd unit
+### 7.7 Install the systemd unit
 
 ```bash
 sudo tee /etc/systemd/system/openvdi-broker.service > /dev/null <<'EOF'
