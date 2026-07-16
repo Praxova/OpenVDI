@@ -110,7 +110,8 @@ You'll install these in Stage 5:
 
 - PostgreSQL 16+
 - Python 3.12+
-- Node.js 20+ and pnpm
+- Node.js 22 LTS and pnpm (your distro's `nodejs` package is almost
+  certainly too old — Stage 5.1 installs from NodeSource)
 - Caddy (or nginx — Caddy is the default in this guide because
   auto-HTTPS keeps the cert story simple)
 - git
@@ -428,13 +429,37 @@ sudo apt install -y \
   postgresql postgresql-contrib \
   python3.12 python3.12-venv python3-pip \
   curl git \
-  caddy \
-  nodejs npm
-sudo npm install -g pnpm
+  caddy
 ```
 
 (If your distro doesn't ship Python 3.12, add the deadsnakes PPA on
 Ubuntu, or use pyenv. The broker requires 3.12+.)
+
+**Node.js comes from NodeSource, not apt.** Debian 12 and Ubuntu 24.04
+both ship Node 18, which is end-of-life and too old for pnpm. Install
+the 22 LTS line instead:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+sudo npm install -g pnpm@10
+
+# Verify before moving on — node must satisfy portal/package.json's
+# engines field (>=22).
+node -v    # → v22.x
+pnpm -v    # → 10.x
+```
+
+**Pin pnpm to 10.x** (the `@10` above is not a typo). Plain
+`npm install -g pnpm` installs 11.x, which ignores the
+`pnpm.onlyBuiltDependencies` field in `portal/package.json` and then
+fails the install with `ERR_PNPM_IGNORED_BUILDS: esbuild`. Moving to
+pnpm 11 needs that setting relocated to `pnpm-workspace.yaml` — tracked
+separately, not yet done.
+
+If `node -v` still reports v18, apt is preferring the distro package:
+`sudo apt remove -y nodejs npm && sudo apt autoremove -y`, then re-run
+the NodeSource steps above.
 
 ### 5.2 Create the openvdi user
 
@@ -643,6 +668,8 @@ errors at first login attempt, fix `OPENVDI_LDAP_*` and restart.
 `Ctrl-C` to stop. Now switch to running it under systemd.
 
 ### 7.7 Install the systemd unit
+
+You will still be logged in as openvdi and will have to exit back to root, do we need to call this out in the document?
 
 ```bash
 sudo tee /etc/systemd/system/openvdi-broker.service > /dev/null <<'EOF'
