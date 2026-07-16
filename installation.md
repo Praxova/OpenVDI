@@ -764,17 +764,99 @@ Use whichever path you prefer in the Caddyfile below.
 ### 9.1 DNS
 
 Point `openvdi.example.com` (your chosen DNS name) at the OpenVDI
-host's public IP. Caddy will obtain a Let's Encrypt cert
-automatically once the name resolves.
+host's IP, and confirm it resolves before continuing:
 
-If you're behind a corporate firewall, use your own CA — see
-`docs/deploy.md` → *TLS / HTTPS* for the manual-cert path.
+```bash
+getent hosts openvdi.example.com
+```
 
-### 9.2 Write the Caddyfile
+The name must match `OPENVDI_PORTAL_ORIGIN` in your `.env` (Stage 7.3)
+and the certificate's SAN, exactly. A mismatch breaks the refresh
+cookie — see `docs/deploy.md` → *Same-Origin Requirement*.
+
+### 9.2 Get a certificate
+
+Pick the path that matches your CA. This choice is independent of
+everything else in this guide — it changes three lines of Caddyfile
+and nothing else.
+
+**Path A — public CA (Let's Encrypt).** Requires the name to be
+publicly resolvable and ports 80/443 reachable from the internet.
+Nothing to do here: Caddy obtains and renews the cert automatically on
+first request. Skip to 9.3 and use the Caddyfile as printed.
+
+**Path B — private / internal CA** (AD Certificate Services, step-ca,
+Vault, corporate PKI). Issue the cert yourself and hand Caddy the
+files.
+
+Generate a key and CSR on the broker host. The `subjectAltName` is not
+optional — browsers ignore `CN` entirely, so a CSR without a SAN
+produces a cert every browser rejects:
+
+```bash
+sudo mkdir -p /etc/caddy/certs
+sudo openssl req -new -newkey rsa:2048 -nodes \
+  -keyout /etc/caddy/certs/openvdi.key \
+  -out /tmp/openvdi.csr \
+  -subj "/CN=openvdi.example.com" \
+  -addext "subjectAltName=DNS:openvdi.example.com"
+```
+
+Submit `/tmp/openvdi.csr` to your CA and get back a signed cert. With
+AD Certificate Services, that's typically the `WebServer` template:
+
+```bash
+certreq -submit -attrib "CertificateTemplate:WebServer" openvdi.csr openvdi.crt
+```
+
+Assemble the chain — **leaf first, then intermediates**, in one file.
+Omitting the intermediate is the classic "works in Chrome, fails in
+curl and Firefox" bug, because browsers cache intermediates from other
+sites and curl does not:
+
+```bash
+sudo bash -c 'cat leaf.crt intermediate.crt > /etc/caddy/certs/openvdi.crt'
+
+sudo chown root:caddy /etc/caddy/certs/openvdi.crt /etc/caddy/certs/openvdi.key
+sudo chmod 644 /etc/caddy/certs/openvdi.crt
+sudo chmod 640 /etc/caddy/certs/openvdi.key    # never world-readable
+```
+
+Then add **one line** to the Caddyfile in 9.3 — first line inside the
+site block:
+
+```
+openvdi.example.com {
+    tls /etc/caddy/certs/openvdi.crt /etc/caddy/certs/openvdi.key
+    encode gzip
+    ...
+}
+```
+
+Handing `tls` explicit files disables automatic HTTPS for that site, so
+Caddy never contacts Let's Encrypt. Nothing else changes.
+
+Two consequences of Path B worth planning for now:
+
+- **Nothing renews this cert.** Automatic renewal is a property of ACME,
+  not of Caddy. Put the expiry date in a calendar. If your CA speaks
+  ACME (step-ca, Vault, ADCS with the ACME role), point Caddy at it
+  with `acme_ca` instead and you get renewal back.
+- **Every user's browser must trust your CA**, or they get a warning
+  wall instead of the login page. Usually already handled by GPO. If
+  you imported this same CA into the host trust store in Stage 3.4,
+  `curl` on the broker host will verify without `-k` — a useful check
+  that your chain is complete.
+
+### 9.3 Write the Caddyfile
 
 ```bash
 sudo tee /etc/caddy/Caddyfile > /dev/null <<'EOF'
 openvdi.example.com {
+    # Path B (private CA) only — uncomment and point at your files.
+    # Path A (Let's Encrypt) users: leave this out entirely.
+    # tls /etc/caddy/certs/openvdi.crt /etc/caddy/certs/openvdi.key
+
     encode gzip
 
     # Health probe (unauthenticated, plain payload)
@@ -797,13 +879,26 @@ openvdi.example.com {
 }
 EOF
 
+sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 sudo systemctl status caddy
 ```
 
-### 9.3 Verify
+`caddy validate` catches syntax errors and unreadable cert files before
+the reload, rather than after Caddy has already dropped the old config.
 
-From your laptop:
+### 9.4 Verify
+
+On the broker host, confirm the cert Caddy is actually serving — issuer,
+SAN, and expiry:
+
+```bash
+openssl s_client -connect openvdi.example.com:443 \
+  -servername openvdi.example.com </dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+```
+
+Then from your laptop:
 
 ```bash
 curl -sI https://openvdi.example.com/health
@@ -822,13 +917,22 @@ open https://openvdi.example.com/    # or just browse there
 You should see the OpenVDI portal login page over HTTPS with a
 green padlock.
 
-If the cert is still pending (Caddy fetches Let's Encrypt on first
-request), wait a few seconds and try again. Caddy logs cert
-acquisition to its journal:
+Caddy logs cert acquisition and TLS errors to its journal:
 
 ```bash
 sudo journalctl -u caddy -f
 ```
+
+Troubleshooting by symptom:
+
+| Symptom | Likely cause |
+|---|---|
+| Path A: cert pending on first request | Normal — Caddy fetches from Let's Encrypt on demand. Wait a few seconds, retry. |
+| `curl` fails but the browser is fine | Missing intermediate in the chain. Re-check the `cat` order in 9.2 (leaf first). |
+| Browser warns on an internal cert | Client doesn't trust your CA. Push it via GPO, or import it manually. |
+| `ERR_CERT_COMMON_NAME_INVALID` | Cert has no SAN, or the SAN doesn't match the DNS name. Re-issue with `-addext subjectAltName=...`. |
+| Caddy won't start after adding `tls` | The `caddy` user can't read the key. Re-check the `chown`/`chmod` in 9.2. |
+| Login works, then logs out on refresh | Origin mismatch — `OPENVDI_PORTAL_ORIGIN` ≠ the URL you typed. |
 
 ---
 
@@ -1165,9 +1269,11 @@ If you want the pool gone, follow drain with delete-pool. See
 
 Let's Encrypt requires the public DNS to resolve to your host AND
 port 80 reachable from Let's Encrypt's verifier. If you're behind a
-corporate firewall or running an internal-only deployment, switch to
-a corporate CA cert and configure Caddy to use it manually — see
-`docs/deploy.md` → *TLS / HTTPS*.
+corporate firewall or running an internal-only deployment, issue the
+cert from your own CA instead — Stage 9.2 *Path B* has the commands.
+This does not change the Caddy topology; only where the cert comes
+from. `docs/deploy.md` → *TLS / HTTPS* covers the internal-ACME
+variant if your CA supports it.
 
 ### "Postgres connection refused"
 

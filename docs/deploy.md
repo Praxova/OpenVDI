@@ -74,7 +74,9 @@ caddy (:443)
 **Pros:** separation of concerns; broker restarts don't drop the portal; the proxy can handle multiple brokers (load-balancing for HA); auto-HTTPS via Caddy.
 **Cons:** another moving part to deploy and monitor.
 
-**Recommended for v0:** **Option 2 with Caddy**, because Caddy ships with automatic HTTPS via Let's Encrypt and the config is a few lines.
+**Recommended for v0:** **Option 2 with Caddy** — the config is a few lines, and it keeps the portal up across broker restarts.
+
+Note that this choice is about *who serves the portal*, not about *where certificates come from*. The two are independent: Option 2 works the same whether the cert is issued by Let's Encrypt or by an internal CA. See *TLS / HTTPS* below for the certificate axis.
 
 Example `Caddyfile`:
 
@@ -129,7 +131,52 @@ The `Secure` flag on the refresh-token cookie tells the browser to send it only 
 
 In Option 2 (Caddy/nginx), the reverse proxy terminates TLS and the broker speaks plain HTTP on the internal network. In Option 1 (broker serves static), the broker either terminates TLS itself (uvicorn `--ssl-certfile` / `--ssl-keyfile`) or runs behind a TLS-terminating proxy anyway (in which case you might as well move to Option 2).
 
-Cert renewal: with Caddy + Let's Encrypt, automatic. With nginx + manual certs, set up `certbot` cron.
+### Where the certificate comes from
+
+**This is an axis independent of the Option 1 / Option 2 topology choice.** A private CA does not push you toward either option; it changes only how the terminator is configured. Three paths, all compatible with the recommended Option 2 + Caddy:
+
+| Path | When | Renewal |
+|---|---|---|
+| **Public ACME** (Let's Encrypt) | The name is publicly resolvable and 80/443 are internet-reachable | Automatic |
+| **Internal ACME** (step-ca, Vault, ADCS with the ACME role) | You run a private CA that speaks ACME | Automatic |
+| **Manual issuance** (AD CS web enrollment, corporate PKI ticket) | Private CA with no ACME endpoint | **Yours to track** |
+
+**Public ACME.** Caddy's default. Name a site in the Caddyfile and it obtains and renews the cert on first request. No `tls` directive needed.
+
+**Internal ACME.** Point Caddy at your CA's ACME directory and renewal stays automatic:
+
+```
+openvdi.example.com {
+    tls {
+        ca https://step-ca.example.com/acme/acme/directory
+    }
+    # ... handles as normal
+}
+```
+
+The CA's root must be in the *broker host's* trust store for Caddy to validate the ACME endpoint, and in every *client's* trust store for browsers to accept the resulting leaf.
+
+**Manual issuance.** Hand Caddy the files:
+
+```
+openvdi.example.com {
+    tls /etc/caddy/certs/openvdi.crt /etc/caddy/certs/openvdi.key
+    # ... handles as normal
+}
+```
+
+Supplying explicit cert files disables automatic HTTPS for that site — Caddy will not contact any ACME server. Requirements:
+
+- The cert file is the **full chain, leaf first**, then intermediates. A missing intermediate passes in Chrome (which caches intermediates from other sites) and fails in curl and Firefox.
+- The CSR **must** carry a `subjectAltName`. Browsers ignore `CN`; a SAN-less cert is rejected outright with `ERR_CERT_COMMON_NAME_INVALID`.
+- The key must be readable by the `caddy` user and no one else (`chown root:caddy`, `chmod 640`).
+- **Nothing renews it.** Automatic renewal is a property of ACME, not of Caddy. Track the expiry out-of-band; an expired portal cert is a total outage, since the refresh cookie is `Secure` and the auth flow cannot fall back to HTTP.
+
+`installation.md` → *Stage 9* has the operator-level walkthrough with the openssl and `certreq` commands.
+
+### Client trust
+
+With a public CA, browsers trust the chain out of the box. With an internal CA, **every user's browser must trust the CA root** or they hit a warning wall instead of the login page — normally handled by GPO on domain-joined fleets. This applies to the broker host too: `curl https://openvdi.example.com/health` succeeding without `-k` is a good proof that the chain is complete and the root is trusted.
 
 In addition, the noVNC console connection (M3 portal) goes browser-direct to the Proxmox node over `wss://`. The PVE self-signed certificate must be trusted by every user's browser — for v0 LAN deployments, that's a one-time browser prompt per user. Production deployments should issue a real cert to PVE and configure PVE to use it; see Proxmox's `pve-firewall` / `pveproxy` documentation.
 
