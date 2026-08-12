@@ -54,6 +54,7 @@ class _ProxmoxClient:
         default_timeout: float = 30.0,
     ) -> None:
         api_url = api_url.rstrip("/")
+        self._api_url = api_url
         self._client = httpx.AsyncClient(
             base_url=f"{api_url}/api2/json",
             verify=verify_ssl,
@@ -66,6 +67,16 @@ class _ProxmoxClient:
                 "Authorization": f"PVEAPIToken={token_id}={token_secret}",
             },
         )
+
+    @property
+    def api_url(self) -> str:
+        """The cluster's configured API base URL (scheme://host[:port]).
+
+        No `/api2/json` suffix. Exposed so the provider can derive the
+        pveproxy authority for console websocket URLs without reaching
+        into httpx internals.
+        """
+        return self._api_url
 
     async def aclose(self) -> None:
         await self._client.aclose()
