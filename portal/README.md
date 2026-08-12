@@ -5,6 +5,15 @@ the broker's `/api/v1/*` surface and renders the user-facing console.
 
 ## Quick start
 
+Requires **Node.js 22 LTS** (enforced by `engines` in `package.json`)
+and **pnpm 10.x** (`npm install -g pnpm@10`). Distro `nodejs` packages
+are typically too old — use NodeSource, nvm, or Volta.
+
+pnpm 11 does not work yet: it stopped reading the `pnpm` field in
+`package.json`, so `onlyBuiltDependencies` is ignored and the install
+fails on esbuild's build script. The `packageManager` field pins 10.x
+to prevent the accidental upgrade.
+
 ```bash
 # from the OpenVDI repo root
 cd portal

@@ -15,6 +15,7 @@ import logging
 import time
 from typing import ClassVar
 from urllib.parse import quote as _urlquote
+from urllib.parse import urlsplit
 
 from app.providers import register_provider
 from app.providers.base import (
@@ -702,10 +703,18 @@ class ProxmoxProvider:
         password = resp.get("password", "") or ""
         cert = resp.get("cert")
 
-        # PVE 9.x wss:// form. The 'port' query param duplicates the URL
-        # port — that's per spec.
+        # The websocket connects to pveproxy on the cluster's API port,
+        # NOT to the raw VNC port. The VNC port travels only as the
+        # `port` query param, which is how pveproxy picks the VNC
+        # listener to bridge to. Putting `port` in the authority sends
+        # the TLS ClientHello straight at QEMU's raw RFB listener, which
+        # closes the connection (browser sees WebSocket code 1006).
+        #
+        # In a multi-node cluster this stays correct: pveproxy forwards
+        # to whichever node owns the VM based on {node} in the path.
+        api_netloc = urlsplit(self._client.api_url).netloc
         websocket_url = (
-            f"wss://{node}:{port}/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket"
+            f"wss://{api_netloc}/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket"
             f"?port={port}&vncticket={_urlquote(ticket, safe='')}"
         )
 

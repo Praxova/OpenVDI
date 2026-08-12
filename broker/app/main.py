@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -82,24 +81,20 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_encryption_key() -> None:
-    """Fail fast at startup if the Fernet key is missing or malformed.
+    """Fail fast at startup if the Fernet key is malformed.
 
-    Without a valid key, `decrypt_secret` will raise on every cluster
-    row at construction time, leaving every cluster `offline` for an
-    obscure reason. Detecting it here surfaces a clear error message
-    before any cluster loads — matches the M2-11 dev-auth gate.
+    Settings already enforces presence and non-emptiness; this adds the
+    format check. Without a valid key, `decrypt_secret` will raise on
+    every cluster row at construction time, leaving every cluster
+    `offline` for an obscure reason. Detecting it here surfaces a clear
+    error message before any cluster loads.
     """
-    key = os.environ.get("OPENVDI_ENCRYPTION_KEY")
-    if not key:
-        raise RuntimeError(
-            "OPENVDI_ENCRYPTION_KEY environment variable is required. "
-            "Generate one with: python -m app.crypto generate-key"
-        )
+    key = get_settings().openvdi_encryption_key.get_secret_value()
     # Validate format without holding any plaintext — Fernet's constructor
     # raises on malformed keys (wrong length, non-base64).
     try:
         from cryptography.fernet import Fernet
-        Fernet(key.encode() if isinstance(key, str) else key)
+        Fernet(key.encode())
     except Exception as exc:
         raise RuntimeError(
             f"OPENVDI_ENCRYPTION_KEY is malformed: {exc}"

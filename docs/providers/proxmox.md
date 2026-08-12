@@ -258,9 +258,10 @@ For `ConsoleKind.NOVNC`:
 - `POST /nodes/{node}/qemu/{vmid}/vncproxy` with `websocket=1` and `generate-password=1` (translated from `generate_password`).
 - Proxmox response includes `port`, `ticket`, `password`, `cert`, `upid`, `user`.
 - The provider constructs the full browser websocket URL:
-  `wss://{node}:{port}/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket?port={port}&vncticket={urlencoded ticket}`
+  `wss://{api_netloc}/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket?port={port}&vncticket={urlencoded ticket}`
+  where `{api_netloc}` is the `host[:port]` of the cluster's configured API URL (e.g. `10.0.0.2:8006`).
 - Returns `NoVNCTicket(websocket_url=..., password=..., cert_pem=...)`.
-- **Note on URL form**: this is the PVE 9.x form. If it's ever observed to differ from older clusters, the `vncwebsocket` endpoint path is what varies; the query parameters are stable.
+- **Note on URL authority**: the websocket connects to **pveproxy on the cluster API endpoint**, never to the VNC port. The `port` from the vncproxy response (range 5900–5999) is QEMU's raw RFB listener and appears *only* as the `port` query parameter — that value is how pveproxy selects which VNC listener to bridge to. Putting it in the URL authority sends the browser's TLS handshake at the raw RFB socket, which the browser reports as WebSocket close code 1006. The authority is always the API endpoint; in a multi-node cluster, pveproxy forwards to the node that owns the VM based on `{node}` in the path. Observed consistent on PVE 8.4.16 and 9.x.
 
 For `ConsoleKind.SPICE`:
 - `POST /nodes/{node}/qemu/{vmid}/spiceproxy`.
