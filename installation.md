@@ -943,9 +943,10 @@ Browse to `https://openvdi.example.com/`.
 Log in with **your AD username and password** (the user you added
 to `OpenVDI-Admins` in Stage 3.1).
 
-You should land on the OpenVDI home page with an admin sidebar
-visible. The first thing the admin dashboard shows is the cluster
-list — empty because we haven't registered any.
+You should land on the **Desktops** page (empty — no pools exist
+yet), with an **Admin** menu in the top bar. If the **Admin** menu is
+missing, the broker didn't see you as a member of `OpenVDI-Admins`;
+fix the membership, then log out and back in.
 
 If login fails with "Invalid credentials":
 - Check that the user is a direct member of `OpenVDI-Admins` (not
@@ -961,20 +962,26 @@ If login fails with "Invalid credentials":
 
 Still in the portal, as the admin user:
 
-1. **Admin → Clusters → New cluster**.
+1. **Admin → Clusters → Add cluster**.
 2. Fill in:
    - **Name:** `dev-cluster` (matches Stage 1 plan)
-   - **Provider type:** `proxmox`
-   - **API URL:** `https://10.0.0.2:8006` (your PVE)
+   - **API URL:** `https://10.0.0.2:8006` (your PVE). Consoles connect
+     to this same host (Stage 14), so it must be reachable from your
+     users' browsers, not just from the broker.
    - **Token ID:** `openvdi@pve!openvdi` (from Stage 2.1)
-   - **Token secret:** the UUID PVE printed
-   - **Verify SSL:** `false` for self-signed PVE cert; `true` if
-     you have a real CA chain on your PVE.
-3. Click **Save**.
+   - **Token Secret:** the UUID PVE printed
+   - **Verify SSL:** uncheck for a self-signed PVE cert; leave checked
+     if you have a real CA chain on your PVE.
+   - **Node filter:** leave empty.
+3. Click **Create cluster**.
 
-The broker pings PVE in the background. Within ~30 seconds the
-cluster's status flips from `pending` to `active` (or `offline` if
-the connection fails — check the broker log).
+The broker pings PVE before the form returns, so the new cluster
+shows up in the list as **Active** (or **Offline** if the connection
+failed — check the broker log).
+
+**Wait about a minute before Stage 12.** Templates and pools can't
+use a new cluster until the health checker's next pass, which runs
+every 60 seconds.
 
 Verify:
 
@@ -991,68 +998,78 @@ curl -s https://openvdi.example.com/api/v1/clusters \
 
 You need the VMID of the template you built in Stage 4.
 
-1. **Admin → Templates → New template**.
+1. **Admin → Templates → Add template**.
 2. Fill in:
-   - **Name:** `dev-win11-template` (whatever you want)
    - **Cluster:** the cluster you just registered.
-   - **PVE VMID:** the VMID of your template.
-   - **PVE node:** the node where the template lives.
-   - **OS type:** `windows11` (or `ubuntu24`, etc.)
-   - **CPU cores / memory / disk:** defaults; pools can override.
-3. Click **Save**.
+   - **Name:** `dev-win11-template` (whatever you want)
+   - **VMID:** the VMID of your template.
+   - **Node:** the node where the template lives.
+   - **OS Type:** Windows 11 (or Ubuntu 24.04, etc.)
+   - **CPU Cores / Memory (MB) / Disk (GB):** defaults; pools can
+     override CPU and memory.
+3. Click **Create template**.
 
-The broker validates the template by querying PVE for the VMID. If
-it returns "VM not found" or "VM is not a template," double-check
-that you converted the VM to a template in Stage 4.5.
+The broker checks the VMID against PVE when you save. The portal
+shows every rejection as "One or more fields are invalid"; the
+specific reason is in the broker's response (browser dev tools →
+**Network**):
+
+- **"has no active provider"** — the cluster isn't ready yet. Wait a
+  minute after Stage 11 and retry.
+- **"not found on node"** — wrong VMID or node name.
+- **"is not a template"** — convert the VM to a template (Stage 4.5).
 
 ---
 
 ## Stage 13 — Create the first pool
 
-1. **Admin → Pools → New pool**.
+1. **Admin → Pools → Add pool**.
 2. Fill in:
-   - **Name:** `engineering` (URL-safe slug)
-   - **Display name:** `Engineering`
-   - **Pool type:** `nonpersistent` (refreshes desktop on logoff —
-     simplest for first test) or `persistent` (user keeps the same
+   - **Cluster** and **Template:** what you just registered.
+   - **Pool type:** **Non-persistent** (refreshes desktop on logoff —
+     simplest for first test) or **Persistent** (user keeps the same
      desktop across sessions).
-   - **Cluster + template:** what you just registered.
-   - **VMID range start / end:** `5000–5099` (Stage 1).
+   - **Name (slug):** `engineering`
+   - **Display name:** `Engineering`
+   - **VMID range start / end:** `5000` / `5099` (Stage 1).
+   - **Min spare:** `1` (warm-spare count).
+   - **Max size:** `5`.
    - **Name prefix:** `ENG`.
-   - **min_spare:** `1` (warm-spare count).
-   - **max_size:** `5`.
-3. Click **Save**.
+3. Click **Create pool**.
 
 ### 13.1 Grant entitlements
 
-In the pool's detail page:
+In **Admin → Pools**, click the pencil icon on the pool's row. The
+**Entitlements** panel is at the bottom of the page, below the form.
 
-1. Click **Entitlements**.
-2. **Add entitlement** → user or group → name.
-3. For your first smoke test, grant your own AD username (NOT the
-   admin user — use a normal user that's NOT in `OpenVDI-Admins`,
-   to verify entitlements work).
+1. Set **Type** to **Group** or **User**.
+2. Enter the **Group name** or **Username** and click **Add**.
+3. For your first smoke test, grant a normal AD user that's NOT in
+   `OpenVDI-Admins`, to verify entitlements work.
 
-### 13.2 Provision warm spares
+### 13.2 Wait for the warm spare
 
-The pool was created empty. To pre-build the warm-spare desktop:
+You don't need to provision anything by hand. For a non-persistent
+pool, the `pool_provisioner` worker builds desktops up to **Min
+spare** on its own, checking every 30 seconds.
 
-1. Pool detail page → **Provision**.
-2. Count: `1`.
-3. Click **Provision** and wait — the broker clones the template
-   into the first VMID in the range. Watch the pool's "desktops"
-   list; you'll see one row in `provisioning` status, then
-   `available` after ~30–90 seconds (depends on storage).
+Watch **Admin → Desktops**: one row appears as **Provisioning**, then
+turns **Ready** (`available` in the API). Allow a few minutes — the
+broker boots the clone, waits 60 seconds for the guest to settle,
+shuts it down, takes the `openvdi-base` snapshot, and boots it again.
+The VM is then running with no user connected.
 
-If it sits in `provisioning` for more than a few minutes:
+To build extra desktops beyond **Min spare**, click the play icon
+(**Provision warm spares**) on the pool's row in **Admin → Pools**
+and enter a count.
+
+If it stays in **Provisioning** (the health checker marks it
+**Error** after 10 minutes):
 
 - `sudo journalctl -u openvdi-broker -f` — look for `pool_provisioner`
   worker errors.
 - Common causes: VMID range conflicts, template lock contention,
   storage full.
-
-The desktop is "ready" once `status=available` AND
-`power_state=running`. The VM is started but no user is connected.
 
 ---
 
@@ -1071,22 +1088,32 @@ non-admin user this time).
 The browser will:
 - Trigger `POST /api/v1/me/desktops/<pool>/connect` — broker assigns
   a desktop and issues a Proxmox VNC ticket.
-- Open the noVNC viewer, connecting `wss://<pve-node>:8006/...` directly.
+- Open the noVNC viewer, connecting `wss://<api-url-host>:8006/...`
+  directly — the host and port from the cluster's **API URL** (Stage
+  11), whichever node the desktop runs on.
 
 **First-time PVE cert trust:** the noVNC connection goes from your
-browser straight to the PVE node, not through Caddy. If your PVE has
-a self-signed cert, the browser silently fails to connect. Visit
-`https://<pve-node>:8006/` once and accept the cert manually, then
-retry the OpenVDI logon.
+browser straight to PVE, not through Caddy. If your PVE has a
+self-signed cert, the browser silently fails to connect. Visit the
+cluster's API URL (`https://<api-url-host>:8006/`) once and accept
+the cert manually, then retry the OpenVDI logon. Trust is per host:
+accepting the cert under a node's name doesn't cover the API URL if
+that uses an IP or a different name.
 
 Once connected, you should see the Windows / Linux desktop login
 screen. Log in with your guest-OS credentials. The MS Windows
 template will join the AD domain via your existing OS-level config
 — that's not OpenVDI's concern.
 
-When you click **Disconnect** in the portal, the session ends. For
-non-persistent pools, the desktop refreshes on logoff (rolls back to
-the `openvdi-base` snapshot taken right after first provisioning).
+For non-persistent pools, the desktop refreshes when you **log off
+inside the guest OS**: the broker notices the logoff and rolls the
+desktop back to the `openvdi-base` snapshot taken right after first
+provisioning.
+
+Clicking **Disconnect** in the portal ends the session but is not a
+logoff. A non-persistent desktop goes back to **Ready** without
+refreshing, so anything left logged in stays logged in for the next
+user. Log off in the guest first.
 
 **That's the v0 acceptance.** Anything beyond this is operational
 polish.
@@ -1241,11 +1268,12 @@ finishing:
 
 ### "noVNC connection fails / black screen"
 
-The browser connects directly to PVE — not through Caddy.
+The browser connects directly to PVE — not through Caddy — at the
+host in the cluster's **API URL**.
 
-- Visit `https://<pve-node>:8006/` once and accept the cert (Stage
-  14 note).
-- Confirm the user's network can reach the PVE node on port 8006.
+- Visit `https://<api-url-host>:8006/` once and accept the cert
+  (Stage 14 note).
+- Confirm the user's network can reach that host on port 8006.
 - The PVE token must include `VM.Console` (Stage 2.1) — without it,
   ticket issuance succeeds but PVE rejects the WebSocket.
 
